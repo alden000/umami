@@ -1,0 +1,13 @@
+{
+  "name": "@umami/bridge",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts",
+  "dependencies": {
+    "@umami/core": "workspace:*",
+    "@umami/sim": "workspace:*"
+  }
+}

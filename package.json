@@ -1,0 +1,22 @@
+{
+  "name": "umami",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Maritime simulation environment for USV algorithm and AI development and testing",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "typecheck": "tsc --build --force",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "dev": "pnpm --filter @umami/web dev",
+    "headless": "pnpm --filter @umami/headless start",
+    "lint": "tsc --build --force && vitest run"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8",
+    "@types/node": "^22.10.1",
+    "tsx": "^4.19.2"
+  }
+}

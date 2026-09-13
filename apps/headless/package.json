@@ -1,0 +1,15 @@
+{
+  "name": "@umami/headless",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": { "umami-sim": "./src/cli.ts" },
+  "scripts": { "start": "tsx src/cli.ts" },
+  "dependencies": {
+    "@umami/core": "workspace:*",
+    "@umami/sim": "workspace:*",
+    "@umami/dynamics": "workspace:*",
+    "@umami/ais": "workspace:*",
+    "@umami/bridge": "workspace:*"
+  }
+}

@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.turbo/
+*.tsbuildinfo
+.DS_Store
+.env
+.env.local
+coverage/
+# Chart data is large and licensed; never commit ENC source or built tiles
+data/enc/**
+!data/enc/.gitkeep
+data/tiles/**
+!data/tiles/.gitkeep
+data/ais-recordings/**
+!data/ais-recordings/.gitkeep
