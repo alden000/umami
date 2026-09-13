@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import maplibregl from 'maplibre-gl';
-import { Protocol } from 'pmtiles';
+import { FileSource, PMTiles, Protocol } from 'pmtiles';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { WorldSnapshot } from '@umami/sim';
 import type { ColourTable } from '@umami/s52';
@@ -15,24 +15,48 @@ export interface ChartViewProps {
   readonly vectorMinutes: number;
   readonly onMapClick?: (position: { lat: number; lon: number }) => void;
   /**
-   * URL of an ingested chart tile archive, or undefined for no chart.
+   * The chart to draw, or undefined for none.
    *
-   * Undefined is a legitimate state, not a failure: with no ENC installed the
-   * display shows open water of the correct depth colour rather than inventing
-   * a coastline.
+   * A string is the URL of a hosted tile archive. A `File` is one the operator
+   * has opened from their own machine, which is read in place and never
+   * uploaded - see `chartStyleUrl`. Undefined is a legitimate state rather than
+   * a failure: with no chart the display is NODTA, not an invented coastline.
    */
-  readonly chartUrl?: string;
+  readonly chart?: string | File;
   readonly display?: DisplaySettings;
+  /** Called with the chart's own bounds once it has been opened. */
+  readonly onChartBounds?: (bounds: [number, number, number, number]) => void;
+  /** Move the view to these bounds when they change. */
+  readonly fitBounds?: [number, number, number, number];
 }
 
-// PMTiles serves range requests straight from a static file, so the protocol
-// is registered once for the process rather than per map instance. Registering
-// it twice throws.
-let pmtilesRegistered = false;
-function registerPmtiles(): void {
-  if (pmtilesRegistered) return;
-  maplibregl.addProtocol('pmtiles', new Protocol().tile);
-  pmtilesRegistered = true;
+// One protocol instance for the process: registering the handler twice throws,
+// and local archives are registered against this instance by name.
+let protocolInstance: Protocol | undefined;
+function pmtilesProtocol(): Protocol {
+  if (!protocolInstance) {
+    protocolInstance = new Protocol();
+    maplibregl.addProtocol('pmtiles', protocolInstance.tile);
+  }
+  return protocolInstance;
+}
+
+/**
+ * Resolve a chart source to a style URL.
+ *
+ * A hosted archive is addressed directly and served by HTTP range request. A
+ * local `File` is wrapped in a `FileSource`, which slices the bytes straight
+ * out of the file on disk - nothing is uploaded, copied, or held in memory
+ * whole. That distinction is the point rather than an optimisation: ENCs are
+ * licensed data, and it means a publicly hosted build can display charts that
+ * never leave the operator's machine.
+ */
+function chartStyleUrl(chart: string | File): { url: string; archive?: PMTiles } {
+  const protocol = pmtilesProtocol();
+  if (typeof chart === 'string') return { url: `pmtiles://${chart}` };
+  const archive = new PMTiles(new FileSource(chart));
+  protocol.add(archive);
+  return { url: `pmtiles://${chart.name}`, archive };
 }
 
 const SOURCES = ['vessel-hulls', 'vessel-points', 'vessel-vectors'] as const;
@@ -51,8 +75,10 @@ export function ChartView({
   centre,
   vectorMinutes,
   onMapClick,
-  chartUrl,
+  chart,
   display = DEFAULT_DISPLAY,
+  onChartBounds,
+  fitBounds,
 }: ChartViewProps): JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -64,7 +90,7 @@ export function ChartView({
   // operator's zoom and pan, which is unacceptable while something is developing.
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
-    registerPmtiles();
+    pmtilesProtocol();
 
     const map = new maplibregl.Map({
       container: containerRef.current,
@@ -83,13 +109,6 @@ export function ChartView({
     map.addControl(new maplibregl.ScaleControl({ unit: 'nautical' }), 'bottom-left');
 
     map.on('load', () => {
-      // Chart first, so every vessel layer added below draws on top of it.
-      if (chartUrl) {
-        map.addSource('enc', { type: 'vector', url: `pmtiles://${chartUrl}` });
-        for (const layer of encLayers(colours, display)) {
-          map.addLayer(layer as maplibregl.LayerSpecification);
-        }
-      }
       for (const id of SOURCES) {
         map.addSource(id, {
           type: 'geojson',
@@ -138,9 +157,62 @@ export function ChartView({
       }
     };
 
-    if (chartUrl) restyle(encLayers(colours, display));
+    if (chart) restyle(encLayers(colours, display));
     restyle(vesselLayers(colours));
-  }, [colours, display, chartUrl]);
+  }, [colours, display, chart]);
+
+  // Attach, replace or remove the chart. Separate from map creation because a
+  // chart can be opened at any time, and separate from restyling because
+  // swapping the archive means rebuilding the source, not repainting layers.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !readyRef.current) return;
+
+    const layerIds = encLayers(colours, display).map((l) => (l as { id: string }).id);
+    for (const id of layerIds) if (map.getLayer(id)) map.removeLayer(id);
+    if (map.getSource('enc')) map.removeSource('enc');
+    if (!chart) return;
+
+    const { url, archive } = chartStyleUrl(chart);
+    map.addSource('enc', { type: 'vector', url });
+
+    // Insert beneath the vessel overlay: a depth area painted over own ship is
+    // not a cosmetic problem.
+    const firstVesselLayer = vesselLayers(colours)[0] as { id: string } | undefined;
+    const before = firstVesselLayer && map.getLayer(firstVesselLayer.id)
+      ? firstVesselLayer.id
+      : undefined;
+    for (const layer of encLayers(colours, display)) {
+      map.addLayer(layer as maplibregl.LayerSpecification, before);
+    }
+
+    // Move to the chart once it is open. Loading a chart and being left looking
+    // at empty water on the other side of the world reads as a failure.
+    if (archive && onChartBounds) {
+      void archive
+        .getHeader()
+        .then((h) => onChartBounds([h.minLon, h.minLat, h.maxLon, h.maxLat]))
+        .catch(() => undefined);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chart, colours, display]);
+
+  // Move to a newly opened chart. Deliberately not part of the chart effect:
+  // re-fitting on every restyle would fight the operator for control of the
+  // view while they are trying to look at something.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !fitBounds) return;
+    const [west, south, east, north] = fitBounds;
+    if (![west, south, east, north].every(Number.isFinite)) return;
+    map.fitBounds(
+      [
+        [west, south],
+        [east, north],
+      ],
+      { padding: 40, duration: 600 },
+    );
+  }, [fitBounds]);
 
   // Push new vessel positions. Runs at the display rate, not the sim rate.
   useEffect(() => {

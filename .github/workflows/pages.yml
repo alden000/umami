@@ -1,0 +1,79 @@
+# Deploy the web client to GitHub Pages.
+#
+# The client is a static build with no backend: the simulation, the vessel
+# dynamics and the chart rendering all run in the browser. That makes Pages a
+# genuinely suitable host.
+#
+# What deliberately does NOT ship here:
+#
+#   Charts. ENCs are licensed data and this publishes to a public URL. The
+#   deployed app opens a charts.pmtiles from the operator's own machine
+#   instead, which never leaves it. To bundle a chart anyway - only for data
+#   you are licensed to redistribute, such as NOAA ENCs - set VITE_CHART_URL
+#   and commit the archive.
+#
+#   AIS credentials. An aisstream.io key in a static build is readable by
+#   anyone who opens devtools. Live AIS needs a relay holding the key
+#   server-side; see docs/adr/0004-ais-ingest-and-sources.md.
+name: Deploy web client to Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Let a running deploy finish rather than cancelling it midway.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # The deployed build is the tested build.
+      - run: pnpm typecheck
+      - run: pnpm test
+
+      - name: Build
+        env:
+          # Project pages live under /<repo>/; a user or org page would be "/".
+          BASE_PATH: /${{ github.event.repository.name }}/
+        run: pnpm --filter @umami/web build
+
+      # Pages serves 404.html for unknown paths. Copying index.html there keeps
+      # a deep link working instead of showing GitHub's 404.
+      - name: Add SPA fallback
+        run: cp apps/web/dist/index.html apps/web/dist/404.html
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: apps/web/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

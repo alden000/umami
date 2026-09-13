@@ -23,13 +23,54 @@ pnpm dev           # web client at http://localhost:5173
 pnpm headless      # batch runner, ~5600x real time
 ```
 
-To load charts, ingest an S-57 exchange set and point the client at the result:
+## Loading your S-57 charts
+
+S-57 is never parsed by the application. Convert it once, offline, then open
+the result:
 
 ```sh
 tools/enc-ingest/ingest.sh /path/to/ENC_ROOT /tmp/charts
+```
+
+That writes `charts.pmtiles` and `catalogue.json`, and prints what each cell
+contributed by object class — read that output; a cell missing classes you
+expect means something went wrong upstream.
+
+Then either:
+
+**Open it from the running app.** Click **Open chart…** and pick the
+`charts.pmtiles`. The file is read in place off your disk — nothing is
+uploaded, and the view moves to the chart. This works on any deployment,
+including a public one, and is the right option for licensed charts.
+
+**Or bundle it into the build**, for charts you are licensed to redistribute:
+
+```sh
 cp /tmp/charts/charts.pmtiles apps/web/public/
 VITE_CHART_URL=/charts.pmtiles pnpm dev
 ```
+
+> The bundled demo scenario sits in the Singapore Strait. Load a chart
+> elsewhere and the view moves to the chart while the vessels stay put — edit
+> `SCENARIO.origin` in `apps/web/src/App.tsx`, or write your own scenario, to
+> put them together.
+
+## Deploying to GitHub Pages
+
+The client is a static build with no backend — simulation, dynamics and chart
+rendering all run in the browser — so Pages is a suitable host.
+`.github/workflows/pages.yml` typechecks, tests, builds with the correct base
+path and deploys on push to `main`. Enable it under **Settings → Pages →
+Source: GitHub Actions**.
+
+Two things deliberately do not ship with it:
+
+- **Charts.** ENCs are licensed data and Pages is a public URL. The deployed
+  app opens a chart from the operator's own machine instead. Only bundle an
+  archive you are licensed to redistribute.
+- **AIS credentials.** An aisstream.io key in a static build is readable by
+  anyone who opens devtools. Live AIS needs a relay holding the key
+  server-side — see [ADR 0004](docs/adr/0004-ais-ingest-and-sources.md).
 
 The headless runner with no arguments runs a built-in crossing situation in the
 Singapore Strait:

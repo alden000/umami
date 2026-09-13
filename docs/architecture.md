@@ -151,6 +151,12 @@ This is also the seam that keeps S-57 from being load-bearing. S-101 is coming
 and is a different encoding of similar content; when it matters it becomes
 another provider and another ingest path, not a rewrite.
 
+A chart archive can be hosted, or opened from the operator's own disk through
+the browser's file API and read in place. The second is not a convenience: it
+means a publicly deployed build can display licensed charts that never leave
+the machine they are licensed to, which is what makes deploying this to a
+public URL defensible at all.
+
 ### 3.4 The renderer consumes snapshots, nothing else
 
 The core emits `WorldSnapshot` — plain, JSON-serialisable data — and knows
@@ -400,7 +406,8 @@ Deliberately, so the shape could be settled first. Roadmap in `roadmap.md`.
   as plain marks. Colours are token-resolved and ready; the symbols are to be
   authored in-house rather than taken from an existing set (see below).
 - **Mobile and desktop wrappers.** Capacitor and Tauri shells around the same
-  web client. The client is already phone-width clean and offline-capable.
+  web client. The client is already phone-width clean and offline-capable, and
+  deploys to GitHub Pages as a static build.
 - **WebSocket transport for the bridge.** The protocol and server exist and are
   tested over an in-process transport; the socket is a thin wrapper (ADR 0005).
 - **Sensor models.** Radar, camera and GNSS error models, for testing

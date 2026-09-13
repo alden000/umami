@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { toDegrees, toKnots } from '@umami/core';
 import { BUNDLED_COLOUR_TABLES, type ColourScheme } from '@umami/s52';
 import type { VesselClassId } from '@umami/dynamics';
@@ -48,10 +48,11 @@ const GHOST_CLASSES: VesselClassId[] = [
 const TIME_SCALES = [1, 2, 5, 10, 30, 60];
 
 /**
- * Ingested chart archive, if one has been installed.
+ * Chart archive shipped with the deployment, if any.
  *
- * Configured rather than assumed: with no ENC the display is open water of the
- * correct depth colour, which is the honest picture of having no chart.
+ * Set VITE_CHART_URL at build time to bundle one. Left unset - which is the
+ * right default for a public deployment, since ENCs are licensed data - the
+ * operator opens a chart from their own machine instead.
  */
 const CHART_URL: string | undefined = import.meta.env.VITE_CHART_URL;
 
@@ -61,8 +62,24 @@ export function App(): JSX.Element {
   const [dropMode, setDropMode] = useState(false);
   const [vectorMinutes, setVectorMinutes] = useState(6);
 
+  const [localChart, setLocalChart] = useState<File | undefined>(undefined);
+  const [chartBounds, setChartBounds] = useState<[number, number, number, number] | undefined>();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const sim = useSimulation(SCENARIO);
   const colours = BUNDLED_COLOUR_TABLES[scheme];
+
+  // A locally opened chart wins over any bundled one: it is the more
+  // deliberate act of the two.
+  const chart: string | File | undefined = localChart ?? CHART_URL;
+
+  const openChart = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setLocalChart(file);
+      setChartBounds(undefined);
+    }
+  }, []);
 
   const own = sim.snapshot?.objects.find((o) => o.id === sim.snapshot?.ownShipId);
 
@@ -92,7 +109,9 @@ export function App(): JSX.Element {
         colours={colours}
         centre={SCENARIO.origin}
         vectorMinutes={vectorMinutes}
-        chartUrl={CHART_URL}
+        chart={chart}
+        fitBounds={chartBounds}
+        onChartBounds={setChartBounds}
         onMapClick={(position) => {
           if (!dropMode) return;
           sim.spawnGhost(position, ghostClass);
@@ -171,6 +190,32 @@ export function App(): JSX.Element {
               </option>
             ))}
           </select>
+        </div>
+
+        <div className="group">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".pmtiles"
+            onChange={openChart}
+            hidden
+            data-testid="chart-input"
+          />
+          <button onClick={() => fileInputRef.current?.click()} title="Open a charts.pmtiles built by tools/enc-ingest">
+            {localChart ? `Chart: ${localChart.name}` : 'Open chart\u2026'}
+          </button>
+          {localChart && (
+            <button
+              onClick={() => {
+                setLocalChart(undefined);
+                setChartBounds(undefined);
+                if (fileInputRef.current) fileInputRef.current.value = '';
+              }}
+              title="Close the chart"
+            >
+              &times;
+            </button>
+          )}
         </div>
 
         <div className="group">
