@@ -319,6 +319,10 @@ meaningless.
   category can hide a wreck.
 - **The web client is verified by running it**, in Chromium at desktop and
   phone widths — which is how both of its rendering bugs were found.
+- **The chart pipeline is verified against a real ENC**, not a fixture: a NOAA
+  harbour cell (US5NY1CM, New York) through GDAL and tippecanoe and onto the
+  screen. Four defects in the pipeline survived code review and died on first
+  contact with real data (§7).
 
 ---
 
@@ -346,6 +350,13 @@ waterjet that deploys the reverse bucket, which reverses the steering force —
 so the control loop inverted and the vessel chased its own tail. Real vessels
 shed that overspeed by easing the throttle and letting drag do the work.
 Throttle is now floored at zero unless astern is what was actually asked for.
+
+**Absence of data was being drawn as deep water.** The chart background was
+`DEPDW`, so anything not covered by a depth area — outside the cell, a coverage
+hole, under an unsounded pier — rendered as navigable deep water. S-52 has
+`NODTA` for precisely this, and the distinction is the same one the safety
+contour logic already makes about unknown soundings: unknown is not safe. With
+no ENC at all the display is now honestly blank rather than an empty ocean.
 
 **Directional instability is sometimes the right answer.** An early fix forced
 every derived hull to be directionally stable. Large full-form tankers really
@@ -384,12 +395,10 @@ relied on**, since tidal set is central to most realistic USV work.
 
 Deliberately, so the shape could be settled first. Roadmap in `roadmap.md`.
 
-- **ENC rendering end to end.** The ingest pipeline, catalogue, S-57 model,
-  S-52 colours and safety logic exist and are tested; the layers are defined in
-  `apps/web/src/chart-style.ts`. What is missing is a licensed exchange set run
-  through the pipeline and displayed. Nothing in the design is blocking.
-- **S-52 symbols.** Buoys, beacons, lights and topmarks need a symbol set.
-  Colours are token-resolved and ready; the symbols are not drawn.
+- **S-52 point symbols.** Buoys, beacons, lights, daymarks and topmarks are
+  ingested and present in the tiles but have no artwork, so they currently draw
+  as plain marks. Colours are token-resolved and ready; the symbols are to be
+  authored in-house rather than taken from an existing set (see below).
 - **Mobile and desktop wrappers.** Capacitor and Tauri shells around the same
   web client. The client is already phone-width clean and offline-capable.
 - **WebSocket transport for the bridge.** The protocol and server exist and are

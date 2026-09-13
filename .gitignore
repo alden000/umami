@@ -13,3 +13,8 @@ data/tiles/**
 !data/tiles/.gitkeep
 data/ais-recordings/**
 !data/ais-recordings/.gitkeep
+
+# Ingested chart tiles dropped into the web app for local testing. Licensed
+# data and large; the pipeline ships, the charts do not.
+apps/web/public/*.pmtiles
+apps/web/public/catalogue.json

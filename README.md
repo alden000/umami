@@ -4,11 +4,12 @@ A maritime simulation environment for developing and testing USV algorithms and
 AI, with an ECDIS-convention chart display, fed by live or recorded AIS, running
 on desktop, mobile, tablet and web.
 
-> **Status: framework.** The architecture, the simulation core, dynamics, AIS
-> ingest, the external control interface and a working client are in place and
-> tested. Chart rendering from real ENC data, S-52 symbols, and the platform
-> wrappers are scaffolded but not finished — see [`docs/roadmap.md`](docs/roadmap.md).
-> One known defect is documented in [`docs/architecture.md`](docs/architecture.md) §8.
+> **Status: framework.** The architecture, simulation core, dynamics, AIS
+> ingest, external control interface, chart pipeline and a working client are in
+> place and tested. Charts render from real S-57 ENCs (verified against NOAA
+> US5NY1CM). S-52 point symbols and the platform wrappers are not finished —
+> see [`docs/roadmap.md`](docs/roadmap.md). One known defect is documented in
+> [`docs/architecture.md`](docs/architecture.md) §8.
 
 ## Quick start
 
@@ -20,6 +21,14 @@ pnpm typecheck
 
 pnpm dev           # web client at http://localhost:5173
 pnpm headless      # batch runner, ~5600x real time
+```
+
+To load charts, ingest an S-57 exchange set and point the client at the result:
+
+```sh
+tools/enc-ingest/ingest.sh /path/to/ENC_ROOT /tmp/charts
+cp /tmp/charts/charts.pmtiles apps/web/public/
+VITE_CHART_URL=/charts.pmtiles pnpm dev
 ```
 
 The headless runner with no arguments runs a built-in crossing situation in the
@@ -48,9 +57,13 @@ algorithm is fitted — that is the thing under test.
   mode or scripted; real AIS contacts can be taken over and made to misbehave.
 - **External control** — one versioned protocol, five modes from waypoints down
   to raw actuator demands, over WebSocket, stdio, or in-process.
-- **Chart display** — MapLibre with zoom and pan, S-52 day/dusk/night colour
-  schemes, own ship and targets drawn to scale with heading lines and velocity
-  vectors, CPA/TCPA and COLREGs encounter classification.
+- **Charts** — S-57 ENCs ingested offline to vector tiles and rendered with
+  S-52 day/dusk/night colour schemes: depth shading against the safety contour,
+  contours, land, coastline and dangers. Uncharted water draws as `NODTA`, never
+  as deep water.
+- **Chart display** — MapLibre with zoom and pan, own ship and targets drawn to
+  scale with heading lines and velocity vectors, CPA/TCPA and COLREGs encounter
+  classification.
 - **Deterministic and fast** — identical results at any frame rate or time
   scale; ~5,600× real time headless.
 

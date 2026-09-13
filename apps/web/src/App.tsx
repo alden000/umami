@@ -47,6 +47,14 @@ const GHOST_CLASSES: VesselClassId[] = [
 
 const TIME_SCALES = [1, 2, 5, 10, 30, 60];
 
+/**
+ * Ingested chart archive, if one has been installed.
+ *
+ * Configured rather than assumed: with no ENC the display is open water of the
+ * correct depth colour, which is the honest picture of having no chart.
+ */
+const CHART_URL: string | undefined = import.meta.env.VITE_CHART_URL;
+
 export function App(): JSX.Element {
   const [scheme, setScheme] = useState<ColourScheme>('DAY_BRIGHT');
   const [ghostClass, setGhostClass] = useState<VesselClassId>('container-feeder');
@@ -84,6 +92,7 @@ export function App(): JSX.Element {
         colours={colours}
         centre={SCENARIO.origin}
         vectorMinutes={vectorMinutes}
+        chartUrl={CHART_URL}
         onMapClick={(position) => {
           if (!dropMode) return;
           sim.spawnGhost(position, ghostClass);

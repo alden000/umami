@@ -8,10 +8,13 @@ import type { DisplaySettings } from '@umami/s52';
  * between day, dusk and night - or swapping in the official Presentation
  * Library - restyles the whole chart with no other change.
  *
- * With no ENC installed this produces an empty sea of the correct colour,
- * which is the honest representation of having no chart: the display does not
- * invent a coastline. When a catalogue is present, `encLayers` adds the layers
- * that draw it from the ingested tiles.
+ * The background is NODTA - "no data" - and never a depth shade. Everything
+ * not covered by a depth area is, by definition, water of unknown depth:
+ * outside the cell, inside a coverage hole, or under a pier the survey did not
+ * sound. Painting that DEPDW would state that unsurveyed water is deep water,
+ * which is the same class of error as treating an unknown sounding as safe.
+ * With no ENC at all the whole display is NODTA, which is the honest picture of
+ * having no chart. When tiles are present, `encLayers` draws over it.
  */
 export function baseChartStyle(colours: ColourTable): maplibregl.StyleSpecification {
   return {
@@ -26,7 +29,7 @@ export function baseChartStyle(colours: ColourTable): maplibregl.StyleSpecificat
       {
         id: 'background',
         type: 'background',
-        paint: { 'background-color': colours.DEPDW },
+        paint: { 'background-color': colours.NODTA },
       },
     ],
   } as unknown as maplibregl.StyleSpecification;

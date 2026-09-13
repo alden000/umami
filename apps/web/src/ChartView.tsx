@@ -1,9 +1,11 @@
 import { useEffect, useRef } from 'react';
 import maplibregl from 'maplibre-gl';
+import { Protocol } from 'pmtiles';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { WorldSnapshot } from '@umami/sim';
 import type { ColourTable } from '@umami/s52';
-import { baseChartStyle } from './chart-style.js';
+import { DEFAULT_DISPLAY, type DisplaySettings } from '@umami/s52';
+import { baseChartStyle, encLayers } from './chart-style.js';
 import { buildVesselFeatures, vesselLayers } from './vessel-symbols.js';
 
 export interface ChartViewProps {
@@ -12,6 +14,25 @@ export interface ChartViewProps {
   readonly centre: { lat: number; lon: number };
   readonly vectorMinutes: number;
   readonly onMapClick?: (position: { lat: number; lon: number }) => void;
+  /**
+   * URL of an ingested chart tile archive, or undefined for no chart.
+   *
+   * Undefined is a legitimate state, not a failure: with no ENC installed the
+   * display shows open water of the correct depth colour rather than inventing
+   * a coastline.
+   */
+  readonly chartUrl?: string;
+  readonly display?: DisplaySettings;
+}
+
+// PMTiles serves range requests straight from a static file, so the protocol
+// is registered once for the process rather than per map instance. Registering
+// it twice throws.
+let pmtilesRegistered = false;
+function registerPmtiles(): void {
+  if (pmtilesRegistered) return;
+  maplibregl.addProtocol('pmtiles', new Protocol().tile);
+  pmtilesRegistered = true;
 }
 
 const SOURCES = ['vessel-hulls', 'vessel-points', 'vessel-vectors'] as const;
@@ -30,6 +51,8 @@ export function ChartView({
   centre,
   vectorMinutes,
   onMapClick,
+  chartUrl,
+  display = DEFAULT_DISPLAY,
 }: ChartViewProps): JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -41,6 +64,7 @@ export function ChartView({
   // operator's zoom and pan, which is unacceptable while something is developing.
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
+    registerPmtiles();
 
     const map = new maplibregl.Map({
       container: containerRef.current,
@@ -59,6 +83,13 @@ export function ChartView({
     map.addControl(new maplibregl.ScaleControl({ unit: 'nautical' }), 'bottom-left');
 
     map.on('load', () => {
+      // Chart first, so every vessel layer added below draws on top of it.
+      if (chartUrl) {
+        map.addSource('enc', { type: 'vector', url: `pmtiles://${chartUrl}` });
+        for (const layer of encLayers(colours, display)) {
+          map.addLayer(layer as maplibregl.LayerSpecification);
+        }
+      }
       for (const id of SOURCES) {
         map.addSource(id, {
           type: 'geojson',
@@ -85,19 +116,31 @@ export function ChartView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Restyle in place when the colour scheme changes.
+  // Restyle in place when the colour scheme or display settings change.
+  //
+  // The chart layers have to be re-applied here as well as the vessel ones.
+  // Leaving them out is not a subtle fault: the chart stays in day colours
+  // while the vessels and chrome go dark, which is worse than never having
+  // offered a night scheme - it destroys dark adaptation while looking as
+  // though the setting was honoured.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !readyRef.current) return;
-    map.setPaintProperty('background', 'background-color', colours.DEPDW);
-    for (const layer of vesselLayers(colours)) {
-      const spec = layer as { id: string; paint: Record<string, unknown> };
-      if (!map.getLayer(spec.id)) continue;
-      for (const [property, value] of Object.entries(spec.paint)) {
-        map.setPaintProperty(spec.id, property, value as never);
+    map.setPaintProperty('background', 'background-color', colours.NODTA);
+
+    const restyle = (layers: unknown[]): void => {
+      for (const layer of layers) {
+        const spec = layer as { id: string; paint?: Record<string, unknown> };
+        if (!spec.paint || !map.getLayer(spec.id)) continue;
+        for (const [property, value] of Object.entries(spec.paint)) {
+          map.setPaintProperty(spec.id, property, value as never);
+        }
       }
-    }
-  }, [colours]);
+    };
+
+    if (chartUrl) restyle(encLayers(colours, display));
+    restyle(vesselLayers(colours));
+  }, [colours, display, chartUrl]);
 
   // Push new vessel positions. Runs at the display rate, not the sim rate.
   useEffect(() => {

@@ -31,11 +31,15 @@ The open issue and the gaps that would otherwise be built on.
 
 ## Phase 2 — Charts on screen
 
-5. **Run a real exchange set through the pipeline** and display it. The
-   pipeline, catalogue, S-57 model and S-52 logic exist; what is missing is
-   licensed data end to end.
+5. ~~**Run a real exchange set through the pipeline** and display it.~~ **Done** —
+   verified against NOAA US5NY1CM (New York harbour): 57 layers, 6695 features,
+   rendering in day and night schemes. Four pipeline defects found and fixed in
+   the process.
 6. **S-52 symbols.** Buoys, beacons, lights, topmarks, with IALA A/B taken from
-   the chart rather than assumed. Colours are already token-resolved.
+   the chart rather than assumed. Colours are already token-resolved, and the
+   features are already in the tiles. To be authored in-house: OpenCPN's set is
+   the obvious existing source but is GPL-2+, which was judged the wrong
+   dependency for this product.
 7. **Chart precedence and scale bands.** Draw the right cell at the right zoom
    and suppress the coarser one beneath it.
 8. **Chart queries for the USV.** Depth and hazard lookup through

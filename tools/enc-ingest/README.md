@@ -30,6 +30,14 @@ encoding of similar content. When it matters, it becomes a second ingest path
 writing the same tile schema and the same manifest; `ChartProvider` and
 everything above it are unaffected.
 
+## Files
+
+| | |
+|---|---|
+| `ingest.sh` | the pipeline |
+| `tag_features.py` | stamps object class and cell provenance onto each feature |
+| `write_catalogue.py` | builds the `ChartCatalogue` manifest |
+
 ## Requirements
 
 GDAL 3.x with the S-57 driver (`ogrinfo --formats | grep S57`) and
@@ -39,11 +47,34 @@ dependencies only; neither ships with the application.
 ## Usage
 
 ```sh
-./ingest.sh /path/to/exchange-set /path/to/output
+./ingest.sh /path/to/ENC_ROOT /path/to/output
 ```
 
-The exchange set is the directory containing `CATALOG.031` and the `ENC_ROOT`
-tree as supplied by the hydrographic office.
+Point it at the `ENC_ROOT` tree as supplied by the hydrographic office. It
+reports what each cell contributed, by object class:
+
+```
+  converting US5NY1CM
+    57 layers, 6695 features
+      ACHBRT=615 ACHARE=11 BCNLAT=3 BOYLAT=56 COALNE=66 DEPARE=323
+      DEPCNT=368 LIGHTS=61 LNDARE=40 OBSTRN=117 SOUNDG=3464 WRECKS=28 ...
+```
+
+Read that output. A cell missing the classes you expect means something went
+wrong upstream, and it is far cheaper to notice here than to wonder later why
+the chart looks sparse. A cell that yields nothing is refused outright.
+
+To view the result in the web client:
+
+```sh
+cp output/charts.pmtiles apps/web/public/
+VITE_CHART_URL=/charts.pmtiles pnpm dev
+```
+
+## Verified against
+
+NOAA US5NY1CM (New York harbour, usage band 5), GDAL 3.8.4, tippecanoe 2.49 —
+57 layers, 6695 features, rendering in day, dusk and night schemes.
 
 ## What it produces
 
@@ -70,3 +101,32 @@ that looks correct and is wrong, which is the worst available outcome.
 
 ENCs are licensed data. Nothing under `data/` is committed; `.gitignore`
 excludes both source cells and built tiles. Ship the pipeline, not the charts.
+
+## Notes from making this work
+
+Four things here are not obvious and were each found by running the pipeline
+against a real cell rather than by reading the code:
+
+**One OGR layer per object class.** The S-57 driver does not expose a single
+layer with a class attribute; it exposes ~60 layers named `DEPARE`, `LNDARE`,
+`BOYLAT` and so on, and carries only a numeric `OBJL` code on the feature.
+GeoJSON and GeoJSONSeq hold one layer, so converting the whole datasource in
+one call keeps only the first layer and warns. Each layer is therefore
+converted separately and tagged with `OBJL_NAME` here, which is the field every
+renderer style filter keys on.
+
+**Most layers report no geometry type.** `ogrinfo` prints `12: DEPARE` rather
+than `12: DEPARE (Polygon)` for any layer whose geometry is `Unknown (any)`,
+which is most of them. Parsing the layer list with a pattern that expects a
+parenthesised type silently drops exactly the layers that matter.
+
+**`OGR_S57_OPTIONS` is not reliable.** On GDAL 3.8.4, merely setting it changed
+the layer count from 58 to 62 regardless of the value given, and
+`RETURN_PRIMITIVES=OFF` did not suppress the primitive layers. Options are
+passed explicitly with `-oo`, and `DSID`, `IsolatedNode`, `ConnectedNode`,
+`Edge` and `Face` are excluded by name.
+
+**`DSID` has no geometry.** It is the first layer of every cell, so any code
+that reaches for `geometryFields[0]` across layers throws on the first one.
+Combined with a broad `except`, that silently produced whole-world cell bounds,
+which would have let one harbour chart suppress every other chart at every zoom.
