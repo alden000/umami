@@ -1,0 +1,176 @@
+/*
+ * Layout and chrome only. Every chart colour comes from the S-52 palette in
+ * TypeScript, never from here, so that the day/dusk/night schemes stay
+ * consistent and a swap to the official Presentation Library changes one file.
+ *
+ * The interface chrome follows the same three schemes, because a bright panel
+ * beside a night-mode chart destroys dark adaptation just as effectively as a
+ * bright chart does.
+ */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+body {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 13px;
+  -webkit-text-size-adjust: 100%;
+}
+
+.app {
+  position: relative;
+  height: 100%;
+  width: 100%;
+  --panel-bg: rgba(240, 240, 240, 0.94);
+  --panel-fg: #101010;
+  --panel-border: #8c8c8c;
+  --panel-accent: #0050a0;
+  --danger: #d4003c;
+}
+
+.app[data-scheme='DUSK'] {
+  --panel-bg: rgba(26, 31, 34, 0.94);
+  --panel-fg: #d0d0d0;
+  --panel-border: #4a5458;
+  --panel-accent: #3a70b0;
+  --danger: #e0003c;
+}
+
+.app[data-scheme='NIGHT'] {
+  --panel-bg: rgba(10, 13, 14, 0.96);
+  --panel-fg: #909090;
+  --panel-border: #2a3438;
+  --panel-accent: #2a5080;
+  --danger: #b00030;
+}
+
+.chart {
+  position: absolute;
+  inset: 0;
+}
+
+.panel {
+  position: absolute;
+  z-index: 10;
+  background: var(--panel-bg);
+  color: var(--panel-fg);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  padding: 8px 10px;
+  backdrop-filter: blur(4px);
+}
+
+.panel-top {
+  top: 8px;
+  left: 8px;
+  /* Leave room for the map's own controls on the right. */
+  max-width: calc(100% - 70px);
+}
+
+.panel-bottom {
+  bottom: 8px;
+  left: 8px;
+  right: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.readout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  align-items: baseline;
+}
+
+.label {
+  opacity: 0.65;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+}
+
+.value {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  margin-right: 6px;
+}
+
+.risk {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--panel-border);
+  font-size: 12px;
+}
+
+.risk-danger {
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.group {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.group label {
+  opacity: 0.65;
+  font-size: 11px;
+}
+
+button,
+select {
+  font: inherit;
+  font-size: 12px;
+  color: var(--panel-fg);
+  background: transparent;
+  border: 1px solid var(--panel-border);
+  border-radius: 3px;
+  /* Comfortably tappable on a tablet without a stylus. */
+  min-height: 32px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+button:hover,
+select:hover {
+  border-color: var(--panel-accent);
+}
+
+button.active {
+  background: var(--panel-accent);
+  border-color: var(--panel-accent);
+  color: #fff;
+}
+
+/* Phone-width: the bottom panel becomes a scrolling strip rather than
+   wrapping into a block that swallows the chart. */
+@media (max-width: 620px) {
+  .panel-bottom {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    gap: 8px;
+  }
+
+  .group {
+    flex: 0 0 auto;
+  }
+
+  .panel-top {
+    font-size: 12px;
+  }
+}
+
+.maplibregl-ctrl-scale {
+  font-family: inherit;
+}
