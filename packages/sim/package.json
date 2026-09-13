@@ -8,6 +8,7 @@
   "types": "./src/index.ts",
   "dependencies": {
     "@umami/core": "workspace:*",
-    "@umami/dynamics": "workspace:*"
+    "@umami/dynamics": "workspace:*",
+    "@umami/ais": "workspace:*"
   }
 }

@@ -4,9 +4,19 @@ import { CALM_CONDITIONS, VesselDynamics, type EnvironmentConditions } from './v
 import { ShaftRudderPropulsion, WaterjetPropulsion } from './propulsion/index.js';
 import { deriveHydroCoefficients } from './hull.js';
 import type { PropulsionModel } from './types.js';
-import { createVessel, calmWaterResistance, vesselClassForAisType } from './vessel-library.js';
+import {
+  VESSEL_CLASSES,
+  calmWaterResistance,
+  createVessel,
+  vesselClassForAisType,
+} from './vessel-library.js';
 import { NO_WIND, CALM_SEA } from './environment.js';
-import { SEAWATER_DENSITY } from './hull.js';
+import {
+  SEAWATER_DENSITY,
+  conditionMassMatrix,
+  isPhysicallyRealisable,
+  massMatrix,
+} from './hull.js';
 
 
 const DT = 0.1;
@@ -224,5 +234,43 @@ describe('vessel library', () => {
     const v = createVessel('container-feeder', { particulars: { loa: 210, beam: 30 } });
     expect(v.particulars.loa).toBe(210);
     expect(v.particulars.beam).toBe(30);
+  });
+});
+
+describe('physical realisability', () => {
+  it('produces a positive-definite mass matrix for every reference class', () => {
+    for (const def of Object.values(VESSEL_CLASSES)) {
+      const c = deriveHydroCoefficients(def.particulars, def.deriveOptions);
+      const m = massMatrix(c);
+      expect(isPhysicallyRealisable(c), `${def.id} determinant ${m.determinant}`).toBe(true);
+    }
+  });
+
+  it('survives hull proportions far outside the regression envelope', () => {
+    // A square pontoon: nothing like the merchant hulls Clarke fitted.
+    const absurd = { loa: 10, beam: 10, draught: 5, blockCoefficient: 0.95 };
+    const c = deriveHydroCoefficients(absurd);
+    expect(isPhysicallyRealisable(c)).toBe(true);
+  });
+
+  it('repairs coefficients whose added-mass signs are wrong', () => {
+    const good = deriveHydroCoefficients({
+      loa: 100,
+      beam: 16,
+      draught: 6,
+      blockCoefficient: 0.7,
+    });
+    // Positive diagonal added mass is physically impossible in this convention.
+    const broken = { ...good, Yvdot: Math.abs(good.Yvdot), Nrdot: Math.abs(good.Nrdot) };
+    expect(isPhysicallyRealisable(broken)).toBe(false);
+    expect(isPhysicallyRealisable(conditionMassMatrix(broken))).toBe(true);
+  });
+
+  it('does not produce NaN when integrating an extreme hull', () => {
+    const vessel = createVessel('harbour-tug');
+    run(vessel, 600, { throttle: 1, steer: 1 });
+    expect(Number.isFinite(vessel.state.heading)).toBe(true);
+    expect(Number.isFinite(vessel.state.u)).toBe(true);
+    expect(Number.isFinite(vessel.state.r)).toBe(true);
   });
 });

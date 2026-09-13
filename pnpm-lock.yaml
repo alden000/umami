@@ -79,6 +79,9 @@ importers:
 
   packages/sim:
     dependencies:
+      '@umami/ais':
+        specifier: workspace:*
+        version: link:../ais
       '@umami/core':
         specifier: workspace:*
         version: link:../core
