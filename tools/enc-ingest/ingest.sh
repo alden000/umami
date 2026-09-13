@@ -7,6 +7,7 @@ set -euo pipefail
 
 EXCHANGE_SET="${1:?usage: ingest.sh <exchange-set-dir> <output-dir>}"
 OUTPUT="${2:?usage: ingest.sh <exchange-set-dir> <output-dir>}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
@@ -28,35 +29,46 @@ echo "Found ${#CELLS[@]} base cell(s)"
 for CELL_PATH in "${CELLS[@]}"; do
   CELL_NAME="$(basename "$CELL_PATH" .000)"
   echo "  converting $CELL_NAME"
-  # -skipfailures: a single malformed feature must not abandon a whole cell.
-  ogr2ogr -f GeoJSONSeq "$WORK/$CELL_NAME.geojsonl" "$CELL_PATH" \
-    -t_srs EPSG:4326 -skipfailures -lco RS=NO 2>/dev/null || {
-      echo "    WARNING: $CELL_NAME failed to convert, skipping" >&2
-      continue
-    }
-  # Stamp cell provenance onto every feature so chart precedence can be applied
-  # at draw time rather than being baked in here.
+
+  # GDAL's S-57 driver exposes one OGR layer per object class (DEPARE,
+  # LNDARE, BOYLAT, SOUNDG, ...) - dozens of layers from a single cell.
+  # GeoJSON/GeoJSONSeq are single-layer formats, so ogr2ogr given the whole
+  # datasource with no layer selection silently keeps only the FIRST layer
+  # it enumerates and prints a warning that this script used to throw away
+  # with `2>/dev/null`. The renderer's `OBJL_NAME` filter therefore never
+  # matched anything, against every cell, ever - a chart that looked like a
+  # bug in styling was actually never receiving most of its data.
+  #
+  # The fix is to convert each layer separately and stamp its class name onto
+  # every feature ourselves, then concatenate. `ogrinfo -q` lists exactly the
+  # layers this cell actually contains, so nothing is assumed or hard-coded.
+  mapfile -t LAYERS < <(ogrinfo -q "$CELL_PATH" 2>/dev/null \
+    | grep -oP '^\d+:\s*\K[A-Z0-9_]+(?=\s*\()')
+  if [ "${#LAYERS[@]}" -eq 0 ]; then
+    echo "    WARNING: $CELL_NAME has no readable layers, skipping" >&2
+    continue
+  fi
+
+  : > "$WORK/$CELL_NAME.geojsonl"
+  CELL_OK=0
   USAGE_BAND="${CELL_NAME:2:1}"
-  python3 - "$WORK/$CELL_NAME.geojsonl" "$CELL_NAME" "$USAGE_BAND" <<'PY'
-import json, sys
-path, cell, band = sys.argv[1], sys.argv[2], sys.argv[3]
-with open(path) as f:
-    lines = f.readlines()
-with open(path, "w") as f:
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            feature = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        props = feature.setdefault("properties", {}) or {}
-        props["_cell"] = cell
-        props["_usageBand"] = int(band) if band.isdigit() else 0
-        feature["properties"] = props
-        f.write(json.dumps(feature) + "\n")
-PY
+
+  for LAYER in "${LAYERS[@]}"; do
+    LAYER_FILE="$WORK/$CELL_NAME.$LAYER.geojsonl"
+    # -skipfailures: a single malformed feature must not abandon a whole layer.
+    if ogr2ogr -f GeoJSONSeq "$LAYER_FILE" "$CELL_PATH" "$LAYER" \
+        -t_srs EPSG:4326 -skipfailures -lco RS=NO 2>/dev/null; then
+      CELL_OK=1
+      python3 "$SCRIPT_DIR/tag_features.py" "$LAYER_FILE" "$CELL_NAME" "$USAGE_BAND" "$LAYER" \
+        >> "$WORK/$CELL_NAME.geojsonl"
+    fi
+    rm -f "$LAYER_FILE"
+  done
+
+  if [ "$CELL_OK" -eq 0 ]; then
+    echo "    WARNING: $CELL_NAME failed to convert, skipping" >&2
+    rm -f "$WORK/$CELL_NAME.geojsonl"
+  fi
 done
 
 echo "Building tiles"
