@@ -48,6 +48,18 @@ Singapore Strait and its approaches. `updateSubscription` remains on the source
 for callers that do want to follow something - the headless runner following own
 ship, for instance - and still enforces the rate limit.
 
+The box is sent, not enforced. The adapter used to re-check each report against
+its own copy of it and drop anything outside, which is the wrong instinct twice
+over: a report that arrives is a real vessel that really reported, and the
+window between a box changing locally and the provider acting on it is exactly
+when contacts would go missing with nothing to say why. Everything received is
+now accepted and tracked. What is *shown* is a separate, downstream question -
+and one the display should answer, since a contact that exists is worth knowing
+about even when it is off the edge of the area asked for.
+
+The replay source still filters locally, because there is no provider to ask
+and the box would otherwise do nothing at all.
+
 `updateSubscription` must never throw, because of where it is called from: a
 map's `moveend` handler, which MapLibre runs inside its render task queue. An
 exception escaping that queue leaves it flagged as still running and the chart

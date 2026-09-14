@@ -53,8 +53,9 @@ const SCENARIO: ScenarioDefinition = {
  * by 31 nm north-south, covering the westbound and eastbound lanes, the Johor
  * Strait and the eastern anchorages.
  *
- * The adapter applies this box locally as well as sending it, so a contact
- * outside it is dropped either way.
+ * The box is a request to the provider, not a filter applied to what comes
+ * back: everything received is accepted and processed, so a contact the
+ * provider sends from just outside the edge is kept rather than second-guessed.
  */
 const AIS_WINDOW: AisBoundingBox = {
   north: 1.5824335,

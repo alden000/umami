@@ -1,10 +1,5 @@
 import { degrees, knots } from '@umami/core';
-import {
-  BackoffPolicy,
-  BaseAisSource,
-  isInsideBoundingBox,
-  type AisSubscription,
-} from '../source.js';
+import { BackoffPolicy, BaseAisSource, type AisSubscription } from '../source.js';
 import {
   NavigationStatus,
   type AisDimensions,
@@ -364,10 +359,15 @@ export class AisStreamSource extends BaseAisSource {
       return undefined;
     }
 
-    // Provider-side filtering is authoritative, but a locally configured box
-    // may be narrower than what was subscribed, so apply it again here.
-    const boxes = this.subscription?.boundingBoxes;
-    if (boxes?.length && !boxes.some((b) => isInsideBoundingBox(lat, lon, b))) return undefined;
+    // Deliberately no local bounding-box filter. The subscription is a request
+    // to the provider, not a rule to enforce on what comes back: whatever
+    // arrives is a real vessel that really reported, and dropping it here would
+    // discard a genuine observation on the strength of our own copy of a box
+    // the provider has already applied. That goes wrong in both directions - a
+    // box updated locally before the provider acts on it silently loses
+    // contacts, and a provider that is generous at the edges is second-guessed
+    // for no gain. Everything received is accepted and processed; what is
+    // *shown* is a display question, decided downstream.
 
     const sog = asNumber(payload.Sog);
     const cog = asNumber(payload.Cog);

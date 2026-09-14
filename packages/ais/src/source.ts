@@ -26,7 +26,16 @@ export interface AisSourceEvents extends Record<string, unknown> {
   decodeError: { readonly reason: string; readonly raw: unknown };
 }
 
-/** Geographic filter. Sources that cannot filter server-side apply it locally. */
+/**
+ * Geographic area of interest.
+ *
+ * What this means depends on the source. Where the provider filters - a live
+ * feed subscribed to a box - it is a request sent upstream, and whatever comes
+ * back is accepted: a report that arrives is a real vessel that really
+ * reported, and re-checking it against our own copy of the box only discards
+ * genuine observations. Where there is no provider to ask - replaying a
+ * recording - it is applied locally, because otherwise it would do nothing.
+ */
 export interface AisBoundingBox {
   readonly south: number;
   readonly west: number;

@@ -226,14 +226,20 @@ describe('position reports', () => {
     expect((h.messages[0] as AisPositionMessage).stationClass).toBe('B');
   });
 
-  it('applies a locally configured bounding box that is narrower than the subscription', async () => {
+  it('processes every report received, including outside the subscribed box', async () => {
+    // The subscription is a request to the provider, not a filter to enforce on
+    // what comes back. A report that arrives is a real vessel that really
+    // reported; dropping it against our own copy of the box would discard a
+    // genuine observation, and would lose contacts outright in the window
+    // between a local box changing and the provider acting on it.
     const h = harness();
     await h.source.start({
       boundingBoxes: [{ south: 1, west: 103, north: 2, east: 104 }],
     });
     h.sockets[0]!.open();
     h.sockets[0]!.deliver(POSITION_FRAME); // Miami, well outside Singapore
-    expect(h.messages).toHaveLength(0);
+    expect(h.messages).toHaveLength(1);
+    expect((h.messages[0] as AisPositionMessage).position.lat).toBeCloseTo(25.7617, 4);
   });
 });
 
