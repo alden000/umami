@@ -59,6 +59,9 @@ export interface AisStreamSocket {
 
 const DEFAULT_URL = 'wss://stream.aisstream.io/v0/stream';
 
+/** The provider accepts at most one subscription per second per connection. */
+const SUBSCRIPTION_MIN_INTERVAL_MS = 1000;
+
 /** Message type names the feed uses, verbatim. */
 const POSITION_TYPES = new Set([
   'PositionReport',
@@ -76,6 +79,9 @@ export class AisStreamSource extends BaseAisSource {
   private readonly backoff: BackoffPolicy;
   private reconnectHandle?: unknown;
   private stopped = false;
+  /** When the last subscription went out, for the provider's rate limit. */
+  private lastSubscriptionAt = 0;
+  private pendingSubscriptionHandle?: unknown;
 
   constructor(opts: AisStreamOptions) {
     super(opts.id ?? 'aisstream');
@@ -93,12 +99,46 @@ export class AisStreamSource extends BaseAisSource {
     this.connect();
   }
 
+  /**
+   * Replace the active subscription, typically to follow the operator's view.
+   *
+   * The provider closes a connection that receives more than one subscription
+   * per second, so the limit is enforced here rather than left to the caller:
+   * an update inside the window is held and sent when the window opens, and a
+   * newer one supersedes it. Panning a map generates updates far faster than
+   * once a second, and a dropped connection is a worse outcome than a slightly
+   * stale bounding box.
+   */
+  updateSubscription(subscription: AisSubscription): void {
+    this.subscription = subscription;
+    if (this.stopped || !this.socket) return;
+
+    if (this.pendingSubscriptionHandle !== undefined) return; // already queued
+
+    const sinceLast = this.now() - this.lastSubscriptionAt;
+    if (sinceLast >= SUBSCRIPTION_MIN_INTERVAL_MS) {
+      this.sendSubscription();
+      return;
+    }
+    this.pendingSubscriptionHandle = (this.opts.setTimeout ?? setTimeout)(() => {
+      this.pendingSubscriptionHandle = undefined;
+      if (!this.stopped && this.socket) this.sendSubscription();
+    }, SUBSCRIPTION_MIN_INTERVAL_MS - sinceLast);
+  }
+
+  private sendSubscription(): void {
+    if (!this.socket) return;
+    this.socket.send(JSON.stringify(this.buildSubscriptionMessage()));
+    this.lastSubscriptionAt = this.now();
+  }
+
   async stop(): Promise<void> {
     this.stopped = true;
-    if (this.reconnectHandle !== undefined) {
-      (this.opts.clearTimeout ?? clearTimeout)(this.reconnectHandle as never);
-      this.reconnectHandle = undefined;
+    for (const handle of [this.reconnectHandle, this.pendingSubscriptionHandle]) {
+      if (handle !== undefined) (this.opts.clearTimeout ?? clearTimeout)(handle as never);
     }
+    this.reconnectHandle = undefined;
+    this.pendingSubscriptionHandle = undefined;
     this.socket?.close();
     this.socket = undefined;
     this.setState('stopped');
@@ -124,7 +164,7 @@ export class AisStreamSource extends BaseAisSource {
     socket.onopen = () => {
       // Must arrive within 3 s or the server hangs up, so it is sent
       // immediately on open rather than after any other setup.
-      socket.send(JSON.stringify(this.buildSubscriptionMessage()));
+      this.sendSubscription();
       this.backoff.reset();
       this.setState('live');
     };

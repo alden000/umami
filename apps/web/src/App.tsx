@@ -6,6 +6,8 @@ import { assessRisk, type ScenarioDefinition } from '@umami/sim';
 import { ChartView } from './ChartView.js';
 import type { Basemap } from './chart-style.js';
 import { useSimulation } from './useSimulation.js';
+import { useAisStream } from './useAisStream.js';
+import type { AisBoundingBox } from '@umami/ais';
 
 const SCENARIO: ScenarioDefinition = {
   name: 'Singapore Strait',
@@ -69,6 +71,9 @@ export function App(): JSX.Element {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const sim = useSimulation(SCENARIO);
+  const ais = useAisStream(sim.world);
+  const [showAisPanel, setShowAisPanel] = useState(false);
+  const viewBoundsRef = useRef<AisBoundingBox | undefined>(undefined);
   const colours = BUNDLED_COLOUR_TABLES[scheme];
 
   // A locally opened chart wins over any bundled one: it is the more
@@ -116,6 +121,12 @@ export function App(): JSX.Element {
         onChartBounds={setChartBounds}
         basemap={basemap}
         scheme={scheme}
+        onViewChange={(b) => {
+          viewBoundsRef.current = b;
+          // Follow the view only while connected. The source throttles to the
+          // provider's one-subscription-per-second limit.
+          if (ais.connected) ais.setBounds(b);
+        }}
         onMapClick={(position) => {
           if (!dropMode) return;
           sim.spawnGhost(position, ghostClass);
@@ -142,6 +153,13 @@ export function App(): JSX.Element {
           <span className="label">TIME</span>
           <span className="value">{formatTime(sim.snapshot?.simTime ?? 0)}</span>
         </div>
+        {ais.connected && (
+          <div className="ais-status">
+            AIS {ais.status.state} &middot; {ais.contactCount} contacts &middot;{' '}
+            {ais.status.messageCount} messages
+            {ais.status.detail ? ` · ${ais.status.detail}` : ''}
+          </div>
+        )}
         {basemap !== 'none' && (
           <div className="warning">
             Web basemap active &mdash; coastline only, <strong>no depths</strong>, no
@@ -157,6 +175,62 @@ export function App(): JSX.Element {
           </div>
         )}
       </div>
+
+      {showAisPanel && (
+        <div className="panel panel-ais">
+          <div className="ais-title">Live AIS &mdash; aisstream.io</div>
+          <p className="ais-note">
+            Your own API key, kept in this browser only. It is never sent anywhere
+            but aisstream.io, and never built into this site &mdash; a key baked
+            into a public page is readable by every visitor. Get one free at{' '}
+            <a href="https://aisstream.io/" target="_blank" rel="noreferrer">
+              aisstream.io
+            </a>
+            .
+          </p>
+          <div className="group">
+            <input
+              type="password"
+              value={ais.apiKey}
+              onChange={(e) => ais.setApiKey(e.target.value)}
+              placeholder="API key"
+              autoComplete="off"
+              spellCheck={false}
+              data-testid="ais-key"
+              style={{ minWidth: 220 }}
+            />
+            {ais.connected ? (
+              <button onClick={ais.disconnect}>Disconnect</button>
+            ) : (
+              <button
+                onClick={() => {
+                  // Fall back to the scenario area if the map has not reported
+                  // an extent yet, so the button always does something.
+                  const bounds = viewBoundsRef.current ?? {
+                    south: SCENARIO.origin.lat - 0.5,
+                    west: SCENARIO.origin.lon - 0.5,
+                    north: SCENARIO.origin.lat + 0.5,
+                    east: SCENARIO.origin.lon + 0.5,
+                  };
+                  ais.connect(bounds);
+                }}
+                disabled={!ais.apiKey}
+                data-testid="ais-connect"
+              >
+                Connect
+              </button>
+            )}
+            <button onClick={() => setShowAisPanel(false)} title="Close">
+              &times;
+            </button>
+          </div>
+          <p className="ais-note">
+            Subscribes to the area you are looking at and follows it as you pan.
+            Contacts are observations &mdash; dead-reckoned between reports, and
+            dropped when they go quiet, never extrapolated indefinitely.
+          </p>
+        </div>
+      )}
 
       <div className="panel panel-bottom">
         <div className="group">
@@ -200,6 +274,16 @@ export function App(): JSX.Element {
               </option>
             ))}
           </select>
+        </div>
+
+        <div className="group">
+          <button
+            onClick={() => setShowAisPanel((v) => !v)}
+            className={ais.connected ? 'active' : ''}
+            title="Live AIS from aisstream.io"
+          >
+            {ais.connected ? `AIS \u25cf ${ais.contactCount}` : 'Live AIS\u2026'}
+          </button>
         </div>
 
         <div className="group">

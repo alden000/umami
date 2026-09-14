@@ -53,9 +53,9 @@ The open issue and the gaps that would otherwise be built on.
 10. **Hosted mode.** Run the core server-side, stream snapshots to thin
     clients. The snapshot boundary already supports it; this is deployment plus
     multi-client session management.
-11. **AIS relay.** A small service holding the aisstream.io credential so
-    browser clients can consume live AIS without the key shipping in the
-    bundle (ADR 0004).
+11. **AIS relay.** A small service holding one aisstream.io credential, so
+    operators need not each supply their own. The client already accepts one
+    via VITE_AIS_STREAM_URL; what is missing is the service (ADR 0011).
 
 ## Phase 4 — Evidence
 

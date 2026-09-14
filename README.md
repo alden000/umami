@@ -55,6 +55,30 @@ VITE_CHART_URL=/charts.pmtiles pnpm dev
 > `SCENARIO.origin` in `apps/web/src/App.tsx`, or write your own scenario, to
 > put them together.
 
+### Live AIS
+
+**Live AIS…** connects to [aisstream.io](https://aisstream.io/) straight from
+the browser, using **your own API key** (free). The key is kept in your
+browser's local storage — it is never committed, never built into the site, and
+goes nowhere but aisstream.io. A key baked into a public page would be readable
+by every visitor, which is why it is entered rather than bundled.
+
+It subscribes to the area you are looking at and follows it as you pan, held to
+the provider's one-subscription-per-second limit by the source itself.
+
+Contacts are drawn distinctly from simulated vessels, because they are not the
+same kind of thing: they are observations, dead-reckoned between reports and
+dropped when they go quiet. Simulated vessels are hypotheses.
+
+To keep one credential server-side instead of asking each operator for theirs,
+point the client at a relay:
+
+```sh
+VITE_AIS_STREAM_URL='wss://your-relay.example/stream' pnpm dev
+```
+
+See [ADR 0011](docs/adr/0011-live-ais-in-the-browser.md).
+
 ### Web basemap fallback
 
 With no ENC for an area, **Basemap → OpenStreetMap** (or **OSM + seamarks**,
@@ -89,9 +113,9 @@ Two things deliberately do not ship with it:
 - **Charts.** ENCs are licensed data and Pages is a public URL. The deployed
   app opens a chart from the operator's own machine instead. Only bundle an
   archive you are licensed to redistribute.
-- **AIS credentials.** An aisstream.io key in a static build is readable by
-  anyone who opens devtools. Live AIS needs a relay holding the key
-  server-side — see [ADR 0004](docs/adr/0004-ais-ingest-and-sources.md).
+- **AIS credentials.** No key is built in. Live AIS uses one the operator
+  enters at runtime, held in their own browser — or a relay, if you would rather
+  hold one server-side. See [ADR 0011](docs/adr/0011-live-ais-in-the-browser.md).
 
 The headless runner with no arguments runs a built-in crossing situation in the
 Singapore Strait:

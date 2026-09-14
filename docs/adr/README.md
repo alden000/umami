@@ -16,3 +16,4 @@ one rather than an edit, so the reasoning stays reviewable.
 | [0008](0008-s52-symbology-and-provenance.md) | S-52 colours are loadable data |
 | [0009](0009-scenarios-and-ghost-targets.md) | Ghost targets are full dynamic vessels |
 | [0010](0010-web-basemap-fallback.md) | Web basemap as a fallback, never as a chart |
+| [0011](0011-live-ais-in-the-browser.md) | Live AIS from the browser, on the operator's own key |

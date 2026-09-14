@@ -9,6 +9,10 @@ import {
   type WorldSnapshot,
 } from '@umami/sim';
 import type { VesselClassId } from '@umami/dynamics';
+import type { World } from '@umami/sim';
+
+/** How often to drop contacts that have stopped reporting. */
+const PRUNE_INTERVAL_MS = 30_000;
 
 /**
  * Runs the simulation in the browser and exposes its state to React.
@@ -21,6 +25,8 @@ import type { VesselClassId } from '@umami/dynamics';
  * a mobile browser ends up dropping frames.
  */
 export interface SimulationHandle {
+  /** The running world, for subsystems that attach to it such as live AIS. */
+  readonly world: World | undefined;
   readonly snapshot: WorldSnapshot | undefined;
   readonly timeScale: number;
   readonly paused: boolean;
@@ -36,7 +42,7 @@ export function useSimulation(
   definition: ScenarioDefinition,
   displayRateHz = 8,
 ): SimulationHandle {
-  const worldRef = useRef<ReturnType<typeof loadScenario>['world'] | null>(null);
+  const worldRef = useRef<World | null>(null);
   const [snapshot, setSnapshot] = useState<WorldSnapshot | undefined>(undefined);
   const [timeScale, setTimeScaleState] = useState(1);
   const [paused, setPaused] = useState(false);
@@ -53,6 +59,7 @@ export function useSimulation(
     let frame = 0;
     let lastFrameMs = performance.now();
     let lastPublishMs = 0;
+    let lastPruneMs = 0;
     const publishInterval = 1000 / displayRateHz;
 
     const tick = (nowMs: number): void => {
@@ -69,6 +76,14 @@ export function useSimulation(
       if (nowMs - lastPublishMs >= publishInterval) {
         lastPublishMs = nowMs;
         setSnapshot(world.snapshot());
+
+        // Forget contacts that have gone quiet. Done here rather than every
+        // step because it walks every track, and a contact going stale is a
+        // matter of minutes.
+        if (nowMs - lastPruneMs >= PRUNE_INTERVAL_MS) {
+          lastPruneMs = nowMs;
+          world.pruneTracks();
+        }
       }
     };
 
@@ -130,6 +145,7 @@ export function useSimulation(
   }, []);
 
   return {
+    world: worldRef.current ?? undefined,
     snapshot,
     timeScale,
     paused,

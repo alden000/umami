@@ -38,6 +38,18 @@ export interface ChartViewProps {
   readonly basemap?: Basemap;
   /** Needed to tone the basemap to the active scheme. */
   readonly scheme?: ColourScheme;
+  /**
+   * Called as the operator pans or zooms, with the visible extent.
+   *
+   * Fires freely; consumers that talk to a rate-limited service must throttle
+   * for themselves rather than assume this is quiet.
+   */
+  readonly onViewChange?: (bounds: {
+    south: number;
+    west: number;
+    north: number;
+    east: number;
+  }) => void;
 }
 
 // One protocol instance for the process: registering the handler twice throws,
@@ -91,12 +103,15 @@ export function ChartView({
   fitBounds,
   basemap = 'none',
   scheme = 'DAY_BRIGHT',
+  onViewChange,
 }: ChartViewProps): JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const readyRef = useRef(false);
   const clickRef = useRef(onMapClick);
   clickRef.current = onMapClick;
+  const viewRef = useRef(onViewChange);
+  viewRef.current = onViewChange;
 
   // Create the map once. Re-creating it on a prop change would reset the
   // operator's zoom and pan, which is unacceptable while something is developing.
@@ -140,6 +155,25 @@ export function ChartView({
     map.on('click', (e) => {
       clickRef.current?.({ lat: e.lngLat.lat, lon: e.lngLat.lng });
     });
+
+    const reportView = (): void => {
+      const b = map.getBounds();
+      viewRef.current?.({
+        south: b.getSouth(),
+        west: b.getWest(),
+        north: b.getNorth(),
+        east: b.getEast(),
+      });
+    };
+
+    // moveend rather than move: the extent is only interesting once the
+    // operator has stopped, and every consumer of it is expensive.
+    map.on('moveend', reportView);
+    // And once on load. Without this the first report only arrives after the
+    // operator happens to pan, so anything that needs the current extent - live
+    // AIS asks for exactly the area being viewed - silently has nothing to work
+    // with until then.
+    map.on('load', reportView);
 
     mapRef.current = map;
     return () => {
