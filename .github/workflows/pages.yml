@@ -19,7 +19,12 @@ name: Deploy web client to Pages
 
 on:
   push:
-    branches: [main]
+    # This repository's default branch is the feature branch, not main, so a
+    # trigger on main alone would never fire. Both are listed rather than one
+    # so the workflow keeps working after any eventual rename or merge.
+    branches:
+      - main
+      - claude/maritime-usv-simulation-yc6woq
   workflow_dispatch:
 
 permissions:
@@ -48,6 +53,16 @@ jobs:
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
+
+      # Creates the Pages site on first run if it does not exist yet, so
+      # publishing needs no manual switch in repository settings. Without this
+      # the deploy step fails with "Get Pages site failed" until someone
+      # enables Pages by hand.
+      - name: Configure Pages
+        id: pages
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
 
       # The deployed build is the tested build.
       - run: pnpm typecheck
