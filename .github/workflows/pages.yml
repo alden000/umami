@@ -15,6 +15,11 @@
 #   AIS credentials. An aisstream.io key in a static build is readable by
 #   anyone who opens devtools. Live AIS needs a relay holding the key
 #   server-side; see docs/adr/0004-ais-ingest-and-sources.md.
+# ONE-TIME SETUP: Pages must be enabled by a repository admin before the
+# deploy step can succeed - Settings > Pages > Source: GitHub Actions.
+# It cannot be done from here: actions/configure-pages with enablement:true
+# is refused with "Resource not accessible by integration", because creating a
+# Pages site needs admin rights the workflow token does not carry.
 name: Deploy web client to Pages
 
 on:
@@ -53,16 +58,6 @@ jobs:
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
-
-      # Creates the Pages site on first run if it does not exist yet, so
-      # publishing needs no manual switch in repository settings. Without this
-      # the deploy step fails with "Get Pages site failed" until someone
-      # enables Pages by hand.
-      - name: Configure Pages
-        id: pages
-        uses: actions/configure-pages@v5
-        with:
-          enablement: true
 
       # The deployed build is the tested build.
       - run: pnpm typecheck
