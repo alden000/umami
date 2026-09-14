@@ -43,10 +43,24 @@ because of where the operator happened to be looking, which is the opposite of
 what a traffic picture is for. It also generated subscription updates far faster
 than the one per second the provider accepts, for no gain.
 
-The window is a constant in the web client (`AIS_WINDOW`), currently the
-Singapore Strait and its approaches. `updateSubscription` remains on the source
-for callers that do want to follow something - the headless runner following own
-ship, for instance - and still enforces the rate limit.
+The window is entered by the operator and kept in their own `localStorage`,
+alongside the key and for the same reason: it is theirs, it is not a secret, and
+a tool that forgets where you work every time you open it is a tool you argue
+with. A first load defaults to the whole world - somebody who has not yet said
+what they care about is better served seeing traffic and narrowing down than by
+an empty chart they then have to diagnose. Editing it re-subscribes a live
+connection in place rather than reconnecting, which would throw away the
+contacts already gathered.
+
+A stored window is validated on the way back in, not trusted. It was written by
+this app, but it can also have been written by an older build or edited by hand,
+and a box that would be refused from the keyboard must not get in through
+storage instead - a transposed corner produces a subscription that returns
+nothing, which looks exactly like quiet water.
+
+`updateSubscription` remains on the source for callers that do want to follow
+something - the headless runner following own ship, for instance - and still
+enforces the rate limit.
 
 The box is sent, not enforced. The adapter used to re-check each report against
 its own copy of it and drop anything outside, which is the wrong instinct twice

@@ -7,7 +7,8 @@ import { ChartView } from './ChartView.js';
 import type { Basemap } from './chart-style.js';
 import { useSimulation } from './useSimulation.js';
 import { useAisStream } from './useAisStream.js';
-import type { AisBoundingBox } from '@umami/ais';
+import { AisWindowEditor } from './AisWindowEditor.js';
+import { formatCorner } from './ais-window.js';
 
 const SCENARIO: ScenarioDefinition = {
   name: 'Singapore Strait',
@@ -36,32 +37,6 @@ const SCENARIO: ScenarioDefinition = {
       control: { mode: 'course-speed', courseDegrees: 340, speedKnots: 14 },
     },
   ],
-};
-
-/**
- * The area live AIS is subscribed to.
- *
- * Fixed rather than following the map view. Two reasons it is better fixed.
- * The picture stays the same whatever the operator is looking at, so zooming in
- * on one vessel does not quietly discard the traffic around it and zooming out
- * does not flood the feed with a region nobody is watching. And the provider
- * caps subscription updates at one per second, so a bounding box driven by pan
- * and zoom is a stream of updates against a rate limit for no gain.
- *
- * Corners are the Singapore Strait and its approaches: north-west 1.5824335 N
- * 103.2699253 E, south-east 1.0733847 N 104.8299920 E - about 93 nm east-west
- * by 31 nm north-south, covering the westbound and eastbound lanes, the Johor
- * Strait and the eastern anchorages.
- *
- * The box is a request to the provider, not a filter applied to what comes
- * back: everything received is accepted and processed, so a contact the
- * provider sends from just outside the edge is kept rather than second-guessed.
- */
-const AIS_WINDOW: AisBoundingBox = {
-  north: 1.5824335,
-  west: 103.2699253,
-  south: 1.0733847,
-  east: 104.8299920,
 };
 
 const GHOST_CLASSES: VesselClassId[] = [
@@ -239,7 +214,7 @@ export function App(): JSX.Element {
               <button onClick={ais.disconnect}>Disconnect</button>
             ) : (
               <button
-                onClick={() => ais.connect(AIS_WINDOW)}
+                onClick={ais.connect}
                 disabled={!ais.apiKey}
                 data-testid="ais-connect"
               >
@@ -250,12 +225,16 @@ export function App(): JSX.Element {
               &times;
             </button>
           </div>
+          <div className="ais-window-label">Area of interest</div>
+          <AisWindowEditor value={ais.window} onChange={ais.setWindow} live={ais.connected} />
           <p className="ais-note">
-            Fixed window &mdash; {formatCorner(AIS_WINDOW.north, AIS_WINDOW.west)} to{' '}
-            {formatCorner(AIS_WINDOW.south, AIS_WINDOW.east)}. The picture does
-            not change as you pan or zoom. Contacts are observations &mdash;
-            dead-reckoned between reports, and dropped when they go quiet, never
-            extrapolated indefinitely.
+            {formatCorner(ais.window.north, ais.window.west)} to{' '}
+            {formatCorner(ais.window.south, ais.window.east)}, remembered in this
+            browser. The area is what is asked of the provider; it does not
+            follow the chart as you pan or zoom, and everything the provider
+            sends is tracked. Contacts are observations &mdash; dead-reckoned
+            between reports, and dropped when they go quiet, never extrapolated
+            indefinitely.
           </p>
         </div>
       )}
@@ -372,13 +351,6 @@ export function App(): JSX.Element {
       </div>
     </div>
   );
-}
-
-/** One corner of a bounding box, as a mariner would write it. */
-function formatCorner(lat: number, lon: number): string {
-  const ns = lat >= 0 ? 'N' : 'S';
-  const ew = lon >= 0 ? 'E' : 'W';
-  return `${Math.abs(lat).toFixed(4)}\u00b0${ns} ${Math.abs(lon).toFixed(4)}\u00b0${ew}`;
 }
 
 function pad3(deg: number): string {

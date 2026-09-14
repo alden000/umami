@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AisStreamSource, type AisBoundingBox, type AisSourceStatus } from '@umami/ais';
 import type { World } from '@umami/sim';
+import { loadWindow, saveWindow } from './ais-window.js';
 
 /**
  * Live AIS from aisstream.io, connected straight from the browser.
@@ -31,14 +32,25 @@ const STREAM_URL: string | undefined = import.meta.env.VITE_AIS_STREAM_URL;
 
 export interface AisStreamHandle {
   readonly apiKey: string;
+  /**
+   * The area subscribed to. Remembered between sessions, and the whole world
+   * until the operator says otherwise.
+   */
+  readonly window: AisBoundingBox;
   readonly status: AisSourceStatus;
   readonly connected: boolean;
   readonly contactCount: number;
   setApiKey(key: string): void;
-  connect(bounds: AisBoundingBox): void;
+  /**
+   * Change the area of interest.
+   *
+   * Takes effect immediately on a live connection - the source holds the update
+   * to the provider's one-per-second limit and supersedes anything queued, so
+   * this can be called as fast as someone can type.
+   */
+  setWindow(window: AisBoundingBox): void;
+  connect(): void;
   disconnect(): void;
-  /** Follow the operator's view. Rate limiting is handled by the source. */
-  setBounds(bounds: AisBoundingBox): void;
 }
 
 function loadKey(): string {
@@ -53,6 +65,7 @@ function loadKey(): string {
 
 export function useAisStream(world: World | undefined): AisStreamHandle {
   const [apiKey, setApiKeyState] = useState<string>(loadKey);
+  const [aisWindow, setWindowState] = useState<AisBoundingBox>(loadWindow);
   const [status, setStatus] = useState<AisSourceStatus>({ state: 'idle', messageCount: 0 });
   const [contactCount, setContactCount] = useState(0);
   const sourceRef = useRef<AisStreamSource | undefined>(undefined);
@@ -68,6 +81,15 @@ export function useAisStream(world: World | undefined): AisStreamHandle {
     }
   }, []);
 
+  const setWindow = useCallback((next: AisBoundingBox) => {
+    setWindowState(next);
+    saveWindow(next);
+    // A live connection follows the new area without being torn down: the
+    // provider accepts a replacement subscription, and reconnecting would cost
+    // the contacts already gathered.
+    sourceRef.current?.updateSubscription({ boundingBoxes: [next] });
+  }, []);
+
   const disconnect = useCallback(() => {
     const source = sourceRef.current;
     if (!source) return;
@@ -77,26 +99,19 @@ export function useAisStream(world: World | undefined): AisStreamHandle {
     setStatus({ state: 'stopped', messageCount: 0 });
   }, [world]);
 
-  const connect = useCallback(
-    (bounds: AisBoundingBox) => {
-      if (!world || !apiKey) return;
-      disconnect();
+  const connect = useCallback(() => {
+    if (!world || !apiKey) return;
+    disconnect();
 
-      const source = new AisStreamSource({ apiKey, url: STREAM_URL });
-      source.on('status', setStatus);
-      sourceRef.current = source;
+    const source = new AisStreamSource({ apiKey, url: STREAM_URL });
+    source.on('status', setStatus);
+    sourceRef.current = source;
 
-      // The world routes every message into its track manager, which is what
-      // turns a stream of reports into a picture.
-      world.attachAisSource(source);
-      void source.start({ boundingBoxes: [bounds] });
-    },
-    [world, apiKey, disconnect],
-  );
-
-  const setBounds = useCallback((bounds: AisBoundingBox) => {
-    sourceRef.current?.updateSubscription({ boundingBoxes: [bounds] });
-  }, []);
+    // The world routes every message into its track manager, which is what
+    // turns a stream of reports into a picture.
+    world.attachAisSource(source);
+    void source.start({ boundingBoxes: [aisWindow] });
+  }, [world, apiKey, aisWindow, disconnect]);
 
   // Report how many vessels are actually being tracked, which is a much better
   // signal that the feed is working than a message counter alone: a busy feed
@@ -120,12 +135,13 @@ export function useAisStream(world: World | undefined): AisStreamHandle {
 
   return {
     apiKey,
+    window: aisWindow,
     status,
     connected: status.state === 'live' || status.state === 'reconnecting',
     contactCount,
     setApiKey,
+    setWindow,
     connect,
     disconnect,
-    setBounds,
   };
 }

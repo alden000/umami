@@ -141,6 +141,42 @@ button.link {
   font-size: 11px;
 }
 
+.ais-window-label {
+  margin-top: 10px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  opacity: 0.65;
+}
+
+.ais-window-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+/* Each corner is a labelled box narrow enough that four fit a phone width
+   without the row becoming a scrolling strip. */
+.ais-corner {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 96px;
+}
+
+.ais-corner > span {
+  font-size: 11px;
+  font-weight: 700;
+  opacity: 0.65;
+  width: 12px;
+}
+
+.ais-corner input {
+  width: 100%;
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+}
+
 .ais-status {
   margin-top: 6px;
   padding-top: 6px;
