@@ -4,6 +4,7 @@ import { BUNDLED_COLOUR_TABLES, type ColourScheme } from '@umami/s52';
 import type { VesselClassId } from '@umami/dynamics';
 import { assessRisk, type ScenarioDefinition } from '@umami/sim';
 import { ChartView } from './ChartView.js';
+import type { Basemap } from './chart-style.js';
 import { useSimulation } from './useSimulation.js';
 
 const SCENARIO: ScenarioDefinition = {
@@ -62,6 +63,7 @@ export function App(): JSX.Element {
   const [dropMode, setDropMode] = useState(false);
   const [vectorMinutes, setVectorMinutes] = useState(6);
 
+  const [basemap, setBasemap] = useState<Basemap>('none');
   const [localChart, setLocalChart] = useState<File | undefined>(undefined);
   const [chartBounds, setChartBounds] = useState<[number, number, number, number] | undefined>();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -112,6 +114,8 @@ export function App(): JSX.Element {
         chart={chart}
         fitBounds={chartBounds}
         onChartBounds={setChartBounds}
+        basemap={basemap}
+        scheme={scheme}
         onMapClick={(position) => {
           if (!dropMode) return;
           sim.spawnGhost(position, ghostClass);
@@ -138,6 +142,12 @@ export function App(): JSX.Element {
           <span className="label">TIME</span>
           <span className="value">{formatTime(sim.snapshot?.simTime ?? 0)}</span>
         </div>
+        {basemap !== 'none' && (
+          <div className="warning">
+            Web basemap active &mdash; coastline only, <strong>no depths</strong>, no
+            soundings, no safety contour. Not a navigational chart.
+          </div>
+        )}
         {nearest && (
           <div className={`risk ${nearest.risk.dangerous ? 'risk-danger' : ''}`}>
             {nearest.name}: {(nearest.risk.range / 1852).toFixed(2)} nm &middot; CPA{' '}
@@ -189,6 +199,20 @@ export function App(): JSX.Element {
                 {m} min
               </option>
             ))}
+          </select>
+        </div>
+
+        <div className="group">
+          <label htmlFor="basemap">Basemap</label>
+          <select
+            id="basemap"
+            value={basemap}
+            onChange={(e) => setBasemap(e.target.value as Basemap)}
+            title="Web tiles drawn beneath the chart, for areas no ENC covers. Requires a network connection."
+          >
+            <option value="none">None</option>
+            <option value="osm">OpenStreetMap</option>
+            <option value="osm-seamarks">OSM + seamarks</option>
           </select>
         </div>
 

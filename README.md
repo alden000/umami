@@ -55,6 +55,27 @@ VITE_CHART_URL=/charts.pmtiles pnpm dev
 > `SCENARIO.origin` in `apps/web/src/App.tsx`, or write your own scenario, to
 > put them together.
 
+### Web basemap fallback
+
+With no ENC for an area, **Basemap → OpenStreetMap** (or **OSM + seamarks**,
+which adds buoys, beacons and lights from OpenSeaMap) draws a coastline
+underneath. Where a chart is loaded it always wins; the basemap only fills what
+the chart does not cover.
+
+It is off by default, and it is not a chart: OSM carries **no depths, no
+soundings and no safety contour**, which the app says on screen whenever it is
+active. It also needs a network, unlike everything else here.
+
+The public tile endpoints suit individual interactive use only — the OSM
+Foundation's policy forbids bulk fetching and warns that commercial access may
+be withdrawn. Point the app at your own tile server for anything more:
+
+```sh
+VITE_BASEMAP_TILE_URL='https://your.tiles/{z}/{x}/{y}.png' pnpm dev
+```
+
+See [ADR 0010](docs/adr/0010-web-basemap-fallback.md).
+
 ## Deploying to GitHub Pages
 
 The client is a static build with no backend — simulation, dynamics and chart

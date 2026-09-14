@@ -151,6 +151,10 @@ This is also the seam that keeps S-57 from being load-bearing. S-101 is coming
 and is a different encoding of similar content; when it matters it becomes
 another provider and another ingest path, not a rewrite.
 
+Where no ENC covers the area, an optional web basemap can be drawn beneath the
+chart — never over it, and never without a standing warning that it carries no
+depths. See ADR 0010.
+
 A chart archive can be hosted, or opened from the operator's own disk through
 the browser's file API and read in place. The second is not a convenience: it
 means a publicly deployed build can display licensed charts that never leave

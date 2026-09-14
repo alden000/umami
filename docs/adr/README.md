@@ -15,3 +15,4 @@ one rather than an edit, so the reasoning stays reviewable.
 | [0007](0007-2d-now-3d-later.md) | Snapshot boundary, 2D now and 3D later |
 | [0008](0008-s52-symbology-and-provenance.md) | S-52 colours are loadable data |
 | [0009](0009-scenarios-and-ghost-targets.md) | Ghost targets are full dynamic vessels |
+| [0010](0010-web-basemap-fallback.md) | Web basemap as a fallback, never as a chart |

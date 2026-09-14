@@ -3,9 +3,9 @@ import maplibregl from 'maplibre-gl';
 import { FileSource, PMTiles, Protocol } from 'pmtiles';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { WorldSnapshot } from '@umami/sim';
-import type { ColourTable } from '@umami/s52';
+import type { ColourScheme, ColourTable } from '@umami/s52';
 import { DEFAULT_DISPLAY, type DisplaySettings } from '@umami/s52';
-import { baseChartStyle, encLayers } from './chart-style.js';
+import { BASEMAP_SOURCES, baseChartStyle, basemapLayers, encLayers, type Basemap } from './chart-style.js';
 import { buildVesselFeatures, vesselLayers } from './vessel-symbols.js';
 
 export interface ChartViewProps {
@@ -28,6 +28,16 @@ export interface ChartViewProps {
   readonly onChartBounds?: (bounds: [number, number, number, number]) => void;
   /** Move the view to these bounds when they change. */
   readonly fitBounds?: [number, number, number, number];
+  /**
+   * Web basemap drawn beneath the chart, for areas no ENC covers.
+   *
+   * Deliberately beneath: where an ENC has coverage it wins outright, because
+   * a surveyed chart and a crowd-sourced coastline are not interchangeable and
+   * the one with depths must not be obscured by the one without.
+   */
+  readonly basemap?: Basemap;
+  /** Needed to tone the basemap to the active scheme. */
+  readonly scheme?: ColourScheme;
 }
 
 // One protocol instance for the process: registering the handler twice throws,
@@ -79,6 +89,8 @@ export function ChartView({
   display = DEFAULT_DISPLAY,
   onChartBounds,
   fitBounds,
+  basemap = 'none',
+  scheme = 'DAY_BRIGHT',
 }: ChartViewProps): JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -97,7 +109,11 @@ export function ChartView({
       style: baseChartStyle(colours),
       center: [centre.lon, centre.lat],
       zoom: 12,
-      attributionControl: false,
+      // Attribution comes from whichever sources are active. It must not be
+      // suppressed: the OSM tile policy requires the credit to be visible and
+      // not hidden behind a control, so it is driven by the source definitions
+      // rather than by anything the operator can switch off.
+      attributionControl: { compact: true },
       // North up by default, as a chart is read; rotation is available but not
       // the default, because a rotated chart without a clear indication of
       // orientation is a classic source of error.
@@ -160,6 +176,40 @@ export function ChartView({
     if (chart) restyle(encLayers(colours, display));
     restyle(vesselLayers(colours));
   }, [colours, display, chart]);
+
+  // Attach, replace or remove the basemap. Runs before the chart effect below,
+  // and both insert relative to named layers rather than appending, so the
+  // stack stays basemap / chart / vessels however they are toggled.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !readyRef.current) return;
+
+    for (const id of ['basemap-osm', 'basemap-seamarks']) {
+      if (map.getLayer(id)) map.removeLayer(id);
+      if (map.getSource(id)) map.removeSource(id);
+    }
+    if (basemap === 'none') return;
+
+    map.addSource('basemap-osm', BASEMAP_SOURCES.osm as never);
+    if (basemap === 'osm-seamarks') {
+      map.addSource('basemap-seamarks', BASEMAP_SOURCES.seamarks as never);
+    }
+
+    // Beneath everything: the chart if one is open, otherwise the vessels.
+    const encFirst = encLayers(colours, display)[0] as { id: string } | undefined;
+    const vesselFirst = vesselLayers(colours)[0] as { id: string } | undefined;
+    const before =
+      encFirst && map.getLayer(encFirst.id)
+        ? encFirst.id
+        : vesselFirst && map.getLayer(vesselFirst.id)
+          ? vesselFirst.id
+          : undefined;
+
+    for (const layer of basemapLayers(basemap, scheme)) {
+      map.addLayer(layer as maplibregl.LayerSpecification, before);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [basemap, scheme, chart]);
 
   // Attach, replace or remove the chart. Separate from map creation because a
   // chart can be opened at any time, and separate from restyling because
