@@ -23,8 +23,19 @@ class FakeSocket implements AisStreamSocket {
   open(): void {
     this.onopen?.({});
   }
+  /** Deliver as a text frame. */
   deliver(frame: unknown): void {
     this.onmessage?.({ data: typeof frame === 'string' ? frame : JSON.stringify(frame) });
+  }
+  /** Deliver as a binary frame, which is what aisstream.io actually sends. */
+  deliverBinary(frame: unknown): void {
+    const bytes = new TextEncoder().encode(JSON.stringify(frame));
+    this.onmessage?.({ data: bytes.buffer });
+  }
+  /** Deliver as a Blob, which is what a browser gives for a binary frame by
+   *  default when binaryType has not been set. */
+  deliverBlob(frame: unknown): void {
+    this.onmessage?.({ data: new Blob([JSON.stringify(frame)]) });
   }
   drop(): void {
     this.onclose?.({});
@@ -213,6 +224,45 @@ describe('position reports', () => {
   });
 });
 
+describe('metadata field casing', () => {
+  it('reads the lowercase latitude and longitude the service actually sends', async () => {
+    // Live MetaData is {"MMSI":...,"ShipName":...,"latitude":...,"longitude":...}
+    // - lowercase, unlike every other key in the envelope.
+    const h = harness();
+    await h.source.start();
+    h.sockets[0]!.open();
+    h.sockets[0]!.deliverBinary({
+      MessageType: 'PositionReport',
+      MetaData: {
+        MMSI: 538011723,
+        ShipName: 'CAPTAIN LEON        ',
+        latitude: 1.28593,
+        longitude: 103.95173,
+        time_utc: '2026-09-14 07:17:46.720548509 +0000 UTC',
+      },
+      Message: { PositionReport: { UserID: 538011723, Sog: 4.1, Valid: true } },
+    });
+
+    const m = h.messages[0] as AisPositionMessage;
+    expect(m.position.lat).toBeCloseTo(1.28593, 5);
+    expect(m.position.lon).toBeCloseTo(103.95173, 5);
+  });
+
+  it('parses the nanosecond-precision timestamp format', async () => {
+    const h = harness();
+    await h.source.start();
+    h.sockets[0]!.open();
+    h.sockets[0]!.deliverBinary({
+      MessageType: 'PositionReport',
+      MetaData: { MMSI: 1, latitude: 0, longitude: 0, time_utc: '2026-09-14 07:17:46.720548509 +0000 UTC' },
+      Message: { PositionReport: { UserID: 1 } },
+    });
+    const m = h.messages[0]!;
+    expect(Number.isFinite(m.receivedAt)).toBe(true);
+    expect(m.receivedAt).toBeGreaterThan(Date.parse('2026-09-14T00:00:00Z'));
+  });
+});
+
 describe('static data', () => {
   it('maps identity and dimensions', async () => {
     const h = harness();
@@ -261,6 +311,44 @@ describe('static data', () => {
   });
 });
 
+describe('binary frames', () => {
+  // The service sends JSON over binary WebSocket frames, not text ones. This
+  // was missed because the local test double sent text: everything passed, and
+  // in a browser every frame arrived as a Blob and was dropped in silence.
+  it('decodes a binary frame', async () => {
+    const h = harness();
+    await h.source.start();
+    h.sockets[0]!.open();
+    h.sockets[0]!.deliverBinary(POSITION_FRAME);
+
+    expect(h.messages).toHaveLength(1);
+    expect((h.messages[0] as AisPositionMessage).mmsi).toBe(368207620);
+  });
+
+  it('decodes a Blob frame, for a socket without binaryType set', async () => {
+    const h = harness();
+    await h.source.start();
+    h.sockets[0]!.open();
+    h.sockets[0]!.deliverBlob(POSITION_FRAME);
+
+    // Blobs can only be read asynchronously.
+    await new Promise((r) => setTimeout(r, 20));
+    expect(h.messages).toHaveLength(1);
+  });
+
+  it('reports a frame it cannot make sense of rather than dropping it', async () => {
+    const h = harness();
+    await h.source.start();
+    h.sockets[0]!.open();
+    // An object with no MessageType is exactly what a mishandled binary frame
+    // used to look like by the time it reached the adapter.
+    h.sockets[0]!.deliver({ some: 'other shape' });
+
+    expect(h.messages).toHaveLength(0);
+    expect(h.errors[0]!.reason).toContain('MessageType');
+  });
+});
+
 describe('robustness', () => {
   it('reports malformed JSON instead of throwing', async () => {
     const h = harness();
@@ -274,12 +362,14 @@ describe('robustness', () => {
     const h = harness();
     await h.source.start();
     h.sockets[0]!.open();
-    h.sockets[0]!.deliver({
+    // Verbatim from the live service: no MetaData, and CompressionEnabled
+    // sits directly under Message rather than under a nested key.
+    h.sockets[0]!.deliverBinary({
+      Message: { CompressionEnabled: true },
       MessageType: 'SubscriptionConfirmation',
-      MetaData: {},
-      Message: { SubscriptionConfirmation: { CompressionEnabled: false } },
     });
     expect(h.messages).toHaveLength(0);
+    expect(h.errors).toHaveLength(0);
   });
 
   it('rejects a position outside the possible range', async () => {

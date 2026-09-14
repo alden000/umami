@@ -150,7 +150,14 @@ export class AisStreamSource extends BaseAisSource {
 
     const factory =
       this.opts.webSocketFactory ??
-      ((url: string) => new WebSocket(url) as unknown as AisStreamSocket);
+      ((url: string) => {
+        const socket = new WebSocket(url);
+        // The service sends binary frames. Without this a browser delivers
+        // them as Blobs, which can only be read asynchronously; an ArrayBuffer
+        // is decoded in place and keeps frame handling synchronous.
+        socket.binaryType = 'arraybuffer';
+        return socket as unknown as AisStreamSocket;
+      });
 
     let socket: AisStreamSocket;
     try {
@@ -209,12 +216,54 @@ export class AisStreamSource extends BaseAisSource {
     return message;
   }
 
+  /**
+   * Decode one frame, whatever form the transport delivered it in.
+   *
+   * aisstream.io sends JSON over *binary* WebSocket frames, not text ones.
+   * That matters because the two runtimes hand binary over differently: Node's
+   * `ws` gives a Buffer, while a browser gives a Blob by default and an
+   * ArrayBuffer once `binaryType` is set. Treating anything non-string as
+   * already-parsed - which is what this did - meant every frame in a browser
+   * arrived as a Blob, produced an object with no MessageType, and was dropped
+   * without a word. The connection looked healthy and nothing ever came out.
+   */
   private handleRaw(data: unknown): void {
+    if (typeof data === 'string') {
+      this.parseAndPublish(data, data);
+      return;
+    }
+
+    if (data instanceof ArrayBuffer) {
+      this.parseAndPublish(new TextDecoder().decode(data), data);
+      return;
+    }
+
+    if (ArrayBuffer.isView(data)) {
+      // Covers a Node Buffer and any typed-array view a transport might use.
+      this.parseAndPublish(new TextDecoder().decode(data as Uint8Array), data);
+      return;
+    }
+
+    // A Blob can only be read asynchronously, so it is handled last and out of
+    // band. Setting binaryType to 'arraybuffer' avoids this path, but a caller
+    // supplying its own socket may not have.
+    if (typeof Blob !== 'undefined' && data instanceof Blob) {
+      void data
+        .text()
+        .then((text) => this.parseAndPublish(text, data))
+        .catch(() => this.fail('could not read binary frame', data));
+      return;
+    }
+
+    this.fail(`frame of unsupported type: ${typeof data}`, data);
+  }
+
+  private parseAndPublish(text: string, raw: unknown): void {
     let parsed: unknown;
     try {
-      parsed = typeof data === 'string' ? JSON.parse(data) : data;
+      parsed = JSON.parse(text);
     } catch {
-      this.fail('malformed JSON frame', data);
+      this.fail('malformed JSON frame', raw);
       return;
     }
     const message = this.adapt(parsed);
@@ -223,9 +272,20 @@ export class AisStreamSource extends BaseAisSource {
 
   /** Map one provider frame onto the normalised model. */
   private adapt(frame: unknown): AisMessage | undefined {
-    if (!isRecord(frame)) return undefined;
+    if (!isRecord(frame)) {
+      this.fail('frame was not a JSON object', frame);
+      return undefined;
+    }
     const messageType = asString(frame.MessageType);
-    if (!messageType || messageType === 'SubscriptionConfirmation') return undefined;
+    if (!messageType) {
+      // Every documented frame carries a MessageType. One without it means the
+      // shape is not what this adapter was built for, and saying so is the
+      // difference between a visible failure and a feed that silently never
+      // produces anything.
+      this.fail('frame carried no MessageType', frame);
+      return undefined;
+    }
+    if (messageType === 'SubscriptionConfirmation') return undefined;
 
     const metadata = isRecord(frame.MetaData) ? frame.MetaData : {};
     const payloads = isRecord(frame.Message) ? frame.Message : {};
