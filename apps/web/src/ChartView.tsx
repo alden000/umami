@@ -6,7 +6,7 @@ import type { WorldSnapshot } from '@umami/sim';
 import type { ColourScheme, ColourTable } from '@umami/s52';
 import { DEFAULT_DISPLAY, type DisplaySettings } from '@umami/s52';
 import { BASEMAP_SOURCES, baseChartStyle, basemapLayers, encLayers, type Basemap } from './chart-style.js';
-import { buildVesselFeatures, vesselLayers } from './vessel-symbols.js';
+import { allVesselLayers, buildVesselFeatures } from './vessel-symbols.js';
 
 export interface ChartViewProps {
   readonly snapshot: WorldSnapshot | undefined;
@@ -28,6 +28,16 @@ export interface ChartViewProps {
   readonly onChartBounds?: (bounds: [number, number, number, number]) => void;
   /** Move the view to these bounds when they change. */
   readonly fitBounds?: [number, number, number, number];
+  /**
+   * Called when the map itself reports a problem, typically a tile that would
+   * not load.
+   *
+   * MapLibre swallows these unless something listens: a blocked or
+   * rate-limited tile service simply stops drawing, and the map looks frozen
+   * with nothing in the console to say why. The same principle as everywhere
+   * else here - a failure that hides is worse than one that is loud.
+   */
+  readonly onMapError?: (message: string) => void;
   /**
    * Web basemap drawn beneath the chart, for areas no ENC covers.
    *
@@ -81,7 +91,24 @@ function chartStyleUrl(chart: string | File): { url: string; archive?: PMTiles }
   return { url: `pmtiles://${chart.name}`, archive };
 }
 
-const SOURCES = ['vessel-hulls', 'vessel-points', 'vessel-vectors'] as const;
+/**
+ * Overlay sources, split by how fast the data behind them actually changes.
+ *
+ * Simulated vessels are integrated at 10 Hz and must move smoothly. AIS
+ * contacts report every few seconds at best, and there can be hundreds of
+ * them. Feeding both through one source means re-parsing every contact at the
+ * simulation's rate, and MapLibre parses GeoJSON on the same worker pool it
+ * uses to build tiles - so the overlay starves the chart. Measured with 250
+ * contacts: panning loaded 0-4 tiles against 16 with the overlay quiet.
+ *
+ * Splitting them lets each update at the rate its data warrants.
+ */
+const SIM_SOURCES = ['sim-hulls', 'sim-points', 'sim-vectors'] as const;
+const AIS_SOURCES = ['ais-hulls', 'ais-points', 'ais-vectors'] as const;
+const SOURCES = [...SIM_SOURCES, ...AIS_SOURCES] as const;
+
+/** AIS contacts are redrawn at most this often. */
+const AIS_REDRAW_INTERVAL_MS = 1000;
 
 /**
  * The chart display.
@@ -104,14 +131,18 @@ export function ChartView({
   basemap = 'none',
   scheme = 'DAY_BRIGHT',
   onViewChange,
+  onMapError,
 }: ChartViewProps): JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const readyRef = useRef(false);
+  const lastAisDrawRef = useRef(0);
   const clickRef = useRef(onMapClick);
   clickRef.current = onMapClick;
   const viewRef = useRef(onViewChange);
   viewRef.current = onViewChange;
+  const errorRef = useRef(onMapError);
+  errorRef.current = onMapError;
 
   // Create the map once. Re-creating it on a prop change would reset the
   // operator's zoom and pan, which is unacceptable while something is developing.
@@ -136,6 +167,14 @@ export function ChartView({
       pitch: 0,
     });
 
+    map.on('error', (e) => {
+      const err = e.error as (Error & { status?: number }) | undefined;
+      const source = (e as { sourceId?: string }).sourceId;
+      const status = err?.status ? ` (HTTP ${err.status})` : '';
+      const where = source ? `${source}: ` : '';
+      errorRef.current?.(`${where}${err?.message ?? 'unknown error'}${status}`);
+    });
+
     map.addControl(new maplibregl.NavigationControl({ showCompass: true }), 'top-right');
     map.addControl(new maplibregl.ScaleControl({ unit: 'nautical' }), 'bottom-left');
 
@@ -146,7 +185,7 @@ export function ChartView({
           data: { type: 'FeatureCollection', features: [] },
         });
       }
-      for (const layer of vesselLayers(colours)) {
+      for (const layer of allVesselLayers(colours)) {
         map.addLayer(layer as maplibregl.LayerSpecification);
       }
       readyRef.current = true;
@@ -208,7 +247,7 @@ export function ChartView({
     };
 
     if (chart) restyle(encLayers(colours, display));
-    restyle(vesselLayers(colours));
+    restyle(allVesselLayers(colours));
   }, [colours, display, chart]);
 
   // Attach, replace or remove the basemap. Runs before the chart effect below,
@@ -231,7 +270,7 @@ export function ChartView({
 
     // Beneath everything: the chart if one is open, otherwise the vessels.
     const encFirst = encLayers(colours, display)[0] as { id: string } | undefined;
-    const vesselFirst = vesselLayers(colours)[0] as { id: string } | undefined;
+    const vesselFirst = allVesselLayers(colours)[0] as { id: string } | undefined;
     const before =
       encFirst && map.getLayer(encFirst.id)
         ? encFirst.id
@@ -262,7 +301,7 @@ export function ChartView({
 
     // Insert beneath the vessel overlay: a depth area painted over own ship is
     // not a cosmetic problem.
-    const firstVesselLayer = vesselLayers(colours)[0] as { id: string } | undefined;
+    const firstVesselLayer = allVesselLayers(colours)[0] as { id: string } | undefined;
     const before = firstVesselLayer && map.getLayer(firstVesselLayer.id)
       ? firstVesselLayer.id
       : undefined;
@@ -298,7 +337,10 @@ export function ChartView({
     );
   }, [fitBounds]);
 
-  // Push new vessel positions. Runs at the display rate, not the sim rate.
+  // Push new positions. Simulated vessels every frame the snapshot changes;
+  // AIS contacts at most once a second, because that is as often as they
+  // actually change and redrawing hundreds of them faster is what stops the
+  // chart loading tiles.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !readyRef.current || !snapshot) return;
@@ -308,22 +350,27 @@ export function ChartView({
     const metresPerPixel =
       (156543.03392 * Math.cos((map.getCenter().lat * Math.PI) / 180)) /
       Math.pow(2, map.getZoom());
+    const opts = { colours, vectorMinutes, metresPerPixel };
 
-    const { hulls, points, vectors } = buildVesselFeatures(
-      snapshot.objects,
-      snapshot.ownShipId,
-      { colours, vectorMinutes, metresPerPixel },
-    );
+    const setData = (id: string, data: unknown): void => {
+      (map.getSource(id) as maplibregl.GeoJSONSource | undefined)?.setData(data as never);
+    };
 
-    (map.getSource('vessel-hulls') as maplibregl.GeoJSONSource | undefined)?.setData(
-      hulls as never,
-    );
-    (map.getSource('vessel-points') as maplibregl.GeoJSONSource | undefined)?.setData(
-      points as never,
-    );
-    (map.getSource('vessel-vectors') as maplibregl.GeoJSONSource | undefined)?.setData(
-      vectors as never,
-    );
+    const simulated = snapshot.objects.filter((o) => o.source !== 'ais');
+    const sim = buildVesselFeatures(simulated, snapshot.ownShipId, opts);
+    setData('sim-hulls', sim.hulls);
+    setData('sim-points', sim.points);
+    setData('sim-vectors', sim.vectors);
+
+    const now = performance.now();
+    if (now - lastAisDrawRef.current < AIS_REDRAW_INTERVAL_MS) return;
+    lastAisDrawRef.current = now;
+
+    const contacts = snapshot.objects.filter((o) => o.source === 'ais');
+    const ais = buildVesselFeatures(contacts, snapshot.ownShipId, opts);
+    setData('ais-hulls', ais.hulls);
+    setData('ais-points', ais.points);
+    setData('ais-vectors', ais.vectors);
   }, [snapshot, colours, vectorMinutes]);
 
   return <div ref={containerRef} className="chart" />;

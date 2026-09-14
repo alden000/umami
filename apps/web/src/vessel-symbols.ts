@@ -158,8 +158,17 @@ export function buildVesselFeatures(
   };
 }
 
-/** Layer definitions for the vessel sources. Colours resolve from the palette. */
-export function vesselLayers(colours: ColourTable): unknown[] {
+/**
+ * Layer definitions for one overlay group.
+ *
+ * Built per group - simulated vessels and AIS contacts - because the two are
+ * updated at different rates and therefore need separate sources. The styling
+ * is identical; only the source and layer ids differ, so the visual
+ * distinction between a measured contact and a modelled vessel keeps coming
+ * from the `category` property rather than from which group it happens to be
+ * in.
+ */
+export function vesselLayers(colours: ColourTable, group: 'sim' | 'ais' = 'sim'): unknown[] {
   const byCategory = (own: string, ghost: string, ais: string): unknown[] => [
     'match',
     ['get', 'category'],
@@ -172,18 +181,18 @@ export function vesselLayers(colours: ColourTable): unknown[] {
 
   return [
     {
-      id: 'vessel-hulls',
+      id: `${group}-vessel-hulls`,
       type: 'fill',
-      source: 'vessel-hulls',
+      source: `${group}-hulls`,
       paint: {
         'fill-color': byCategory(colours.SHIPS, colours.CHMGF, colours.ARPAT),
         'fill-opacity': ['case', ['get', 'extrapolated'], 0.25, 0.55],
       },
     },
     {
-      id: 'vessel-hull-outline',
+      id: `${group}-vessel-hull-outline`,
       type: 'line',
-      source: 'vessel-hulls',
+      source: `${group}-hulls`,
       paint: {
         'line-color': byCategory(colours.SHIPS, colours.CHMGD, colours.ARPAT),
         'line-width': 1.5,
@@ -194,9 +203,9 @@ export function vesselLayers(colours: ColourTable): unknown[] {
     // data-driven property in MapLibre - an expression there is rejected at
     // style validation and the whole layer fails to add.
     {
-      id: 'vessel-heading-lines',
+      id: `${group}-vessel-heading-lines`,
       type: 'line',
-      source: 'vessel-vectors',
+      source: `${group}-vectors`,
       filter: ['==', ['get', 'kind'], 'heading'],
       paint: {
         'line-color': byCategory(colours.SHIPS, colours.CHMGD, colours.ARPAT),
@@ -204,9 +213,9 @@ export function vesselLayers(colours: ColourTable): unknown[] {
       },
     },
     {
-      id: 'vessel-velocity-vectors',
+      id: `${group}-vessel-velocity-vectors`,
       type: 'line',
-      source: 'vessel-vectors',
+      source: `${group}-vectors`,
       filter: ['==', ['get', 'kind'], 'velocity'],
       paint: {
         'line-color': byCategory(colours.SHIPS, colours.CHMGD, colours.ARPAT),
@@ -217,9 +226,9 @@ export function vesselLayers(colours: ColourTable): unknown[] {
       },
     },
     {
-      id: 'vessel-points',
+      id: `${group}-vessel-points`,
       type: 'circle',
-      source: 'vessel-points',
+      source: `${group}-points`,
       // Hide the marker where the hull is already drawn to scale.
       filter: ['!', ['get', 'drawnToScale']],
       paint: {
@@ -231,4 +240,10 @@ export function vesselLayers(colours: ColourTable): unknown[] {
       },
     },
   ];
+}
+
+/** Every overlay layer, AIS beneath simulated vessels. */
+export function allVesselLayers(colours: ColourTable): unknown[] {
+  // AIS first so own ship and ghosts draw on top of the traffic around them.
+  return [...vesselLayers(colours, 'ais'), ...vesselLayers(colours, 'sim')];
 }

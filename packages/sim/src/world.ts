@@ -303,7 +303,21 @@ export class World {
 
   /** Prune AIS contacts that have gone quiet. Call periodically, not every step. */
   pruneTracks(): number {
-    return this.tracks.pruneStale(this.clock.wallClock);
+    return this.tracks.pruneStale(this.aisReferenceTime());
+  }
+
+  /**
+   * The clock AIS contacts should be judged against.
+   *
+   * Simulated vessels live on scenario time; AIS reports carry the timebase of
+   * whatever produced them. A live feed is stamped with real wall-clock time,
+   * which may be months away from a scenario's epoch, and comparing the two
+   * makes every contact appear to have reported in the future - never stale,
+   * never extrapolated. Taking the later of the two keeps a purely simulated
+   * world on its own clock while letting live data govern its own staleness.
+   */
+  private aisReferenceTime(): UnixMillis {
+    return Math.max(this.clock.wallClock, this.tracks.latestReportAt);
   }
 
   /** Everything observable, as plain data. */
@@ -314,7 +328,7 @@ export class World {
       objects.push(entity.toWorldObject(this._plane, this._environment));
     }
 
-    const now = this.clock.wallClock;
+    const now = this.aisReferenceTime();
     const simulatedMmsis = new Set(
       [...this.entities.values()].map((e) => e.identity.mmsi).filter((m): m is number => !!m),
     );
@@ -330,7 +344,7 @@ export class World {
     const env = this._environment;
     return {
       simTime: this.clock.time,
-      wallClock: now,
+      wallClock: this.clock.wallClock,
       tick: this.clock.tick,
       timeScale: this.clock.timeScale,
       ownShipId: this._ownShipId,

@@ -131,6 +131,16 @@ body {
   color: var(--panel-accent);
 }
 
+button.link {
+  border: none;
+  background: none;
+  min-height: auto;
+  padding: 0 0 0 8px;
+  text-decoration: underline;
+  opacity: 0.8;
+  font-size: 11px;
+}
+
 .ais-status {
   margin-top: 6px;
   padding-top: 6px;

@@ -83,6 +83,7 @@ export interface TrackManagerEvents extends Record<string, unknown> {
  */
 export class TrackManager {
   private readonly contacts = new Map<number, AisContact>();
+  private _latestReportAt = 0;
   private readonly opts: Required<TrackManagerOptions>;
   private readonly listeners = new Map<keyof TrackManagerEvents, Set<(p: never) => void>>();
 
@@ -117,6 +118,21 @@ export class TrackManager {
     return this.contacts.size;
   }
 
+  /**
+   * The most recent report time seen, in the timebase the source uses.
+   *
+   * Staleness and dead reckoning have to be measured against the data's own
+   * clock, not the host's. A simulation running a scenario dated January
+   * against a live feed timestamped September is 256 days adrift: every
+   * contact looks like it reported in the future, so nothing is ever judged
+   * stale and nothing is ever extrapolated. The contacts accumulate without
+   * limit and sit frozen at their last reported position, and neither failure
+   * announces itself.
+   */
+  get latestReportAt(): UnixMillis {
+    return this._latestReportAt;
+  }
+
   get(mmsi: number): AisContact | undefined {
     return this.contacts.get(mmsi);
   }
@@ -128,10 +144,12 @@ export class TrackManager {
   clear(): void {
     for (const mmsi of this.contacts.keys()) this.emit('removed', { mmsi, reason: 'cleared' });
     this.contacts.clear();
+    this._latestReportAt = 0;
   }
 
   /** Apply one report. */
   ingest(message: AisMessage): void {
+    if (message.receivedAt > this._latestReportAt) this._latestReportAt = message.receivedAt;
     const existing = this.contacts.get(message.mmsi);
 
     if (message.kind === 'position' || message.kind === 'aton') {

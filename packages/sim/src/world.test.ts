@@ -364,3 +364,93 @@ describe('CPA', () => {
     expect(assessRisk(own, target).encounter).toBe('head-on');
   });
 });
+
+describe('AIS contacts against a scenario clock', () => {
+  // A scenario dated January running against a feed timestamped September is
+  // 256 days adrift. Judged against the simulation clock every contact appears
+  // to have reported in the future: nothing is ever stale, nothing is ever
+  // dead-reckoned, and contacts accumulate without limit. Neither failure says
+  // anything - the picture just quietly stops being maintained.
+  const REAL_NOW = Date.parse('2026-09-14T07:00:00Z');
+
+  function worldWithContact(receivedAt: number) {
+    const { world } = loadScenario(
+      baseScenario({
+        // Months behind the feed, as a dated scenario normally is.
+        startTime: '2026-01-01T00:00:00Z',
+        ownShip: { id: 'usv', vesselClass: 'usv-waterjet', position: ORIGIN },
+      }),
+    );
+    world.tracks.ingest({
+      kind: 'position',
+      mmsi: 563000999,
+      sourceId: 'test',
+      stationClass: 'A',
+      receivedAt,
+      position: { lat: 1.21, lon: 103.81 },
+      sog: knots(12),
+      cog: degrees(90),
+    });
+    return world;
+  }
+
+  it('shows a contact whose timestamps are far ahead of the scenario clock', () => {
+    const world = worldWithContact(REAL_NOW);
+    const contact = world.snapshot().objects.find((o) => o.source === 'ais');
+    expect(contact).toBeDefined();
+    expect(contact!.identity.mmsi).toBe(563000999);
+  });
+
+  it('dead-reckons it, rather than freezing it at the last report', () => {
+    const world = worldWithContact(REAL_NOW);
+    const before = world.snapshot().objects.find((o) => o.source === 'ais')!.position;
+
+    // A later report moves the reference clock forward; the first contact
+    // should now be projected along its course rather than held in place.
+    world.tracks.ingest({
+      kind: 'position',
+      mmsi: 563000001,
+      sourceId: 'test',
+      stationClass: 'A',
+      receivedAt: REAL_NOW + 60_000,
+      position: { lat: 1.3, lon: 103.9 },
+      sog: knots(10),
+      cog: degrees(0),
+    });
+
+    const after = world.snapshot().objects.find((o) => o.identity.mmsi === 563000999)!;
+    expect(after.position.lon).toBeGreaterThan(before.lon); // carried east on 090
+    expect(after.extrapolated).toBe(true);
+  });
+
+  it('prunes it once it goes quiet, so contacts cannot accumulate for ever', () => {
+    const world = worldWithContact(REAL_NOW);
+    expect(world.tracks.size).toBe(1);
+
+    // Another vessel reports twenty minutes later: the first is now stale.
+    world.tracks.ingest({
+      kind: 'position',
+      mmsi: 563000002,
+      sourceId: 'test',
+      stationClass: 'A',
+      receivedAt: REAL_NOW + 20 * 60_000,
+      position: { lat: 1.22, lon: 103.82 },
+      sog: knots(8),
+      cog: degrees(180),
+    });
+
+    expect(world.pruneTracks()).toBe(1);
+    expect(world.tracks.size).toBe(1);
+  });
+
+  it('still uses its own clock when no AIS is attached', () => {
+    const { world } = loadScenario(
+      baseScenario({
+        startTime: '2026-01-01T00:00:00Z',
+        ownShip: { id: 'usv', vesselClass: 'usv-waterjet', position: ORIGIN },
+      }),
+    );
+    world.runFor(10);
+    expect(world.snapshot().wallClock).toBeCloseTo(Date.parse('2026-01-01T00:00:10Z'), -2);
+  });
+});

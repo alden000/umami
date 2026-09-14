@@ -74,6 +74,7 @@ export function App(): JSX.Element {
   const ais = useAisStream(sim.world);
   const [showAisPanel, setShowAisPanel] = useState(false);
   const viewBoundsRef = useRef<AisBoundingBox | undefined>(undefined);
+  const [mapError, setMapError] = useState<{ message: string; count: number } | undefined>();
   const colours = BUNDLED_COLOUR_TABLES[scheme];
 
   // A locally opened chart wins over any bundled one: it is the more
@@ -121,6 +122,13 @@ export function App(): JSX.Element {
         onChartBounds={setChartBounds}
         basemap={basemap}
         scheme={scheme}
+        onMapError={(message) =>
+          setMapError((prev) =>
+            prev?.message === message
+              ? { message, count: prev.count + 1 }
+              : { message, count: 1 },
+          )
+        }
         onViewChange={(b) => {
           viewBoundsRef.current = b;
           // Follow the view only while connected. The source throttles to the
@@ -158,6 +166,15 @@ export function App(): JSX.Element {
             AIS {ais.status.state} &middot; {ais.contactCount} contacts &middot;{' '}
             {ais.status.messageCount} messages
             {ais.status.detail ? ` · ${ais.status.detail}` : ''}
+          </div>
+        )}
+        {mapError && (
+          <div className="warning" data-testid="map-error">
+            Chart layer: {mapError.message}
+            {mapError.count > 1 ? ` (\u00d7${mapError.count})` : ''}
+            <button className="link" onClick={() => setMapError(undefined)}>
+              dismiss
+            </button>
           </div>
         )}
         {basemap !== 'none' && (
