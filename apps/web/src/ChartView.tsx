@@ -111,6 +111,44 @@ const SOURCES = [...SIM_SOURCES, ...AIS_SOURCES] as const;
 const AIS_REDRAW_INTERVAL_MS = 1000;
 
 /**
+ * Why every map listener below is wrapped.
+ *
+ * MapLibre runs camera callbacks - and with them `move`, `zoomend`, `moveend`
+ * - from inside its render task queue. That queue sets a `currentlyRunning`
+ * flag before iterating and clears it afterwards, with no `finally`: if a
+ * listener throws, the flag is never cleared, and every subsequent frame
+ * throws `Attempting to run(), but is already running.` on the first line of
+ * the render. The throw is swallowed by the frame promise's `catch`, so
+ * nothing reaches the console.
+ *
+ * The result is a map that renders no further frame for the life of the page -
+ * no tiles, no vessel movement, no response to pan or zoom - while React and
+ * every control keep working normally, because the main thread is perfectly
+ * healthy. One exception, at any time, from any listener, and the chart is
+ * dead with no diagnostic.
+ *
+ * So no listener here is allowed to throw. A listener bug becomes a message on
+ * screen instead of a silently frozen chart.
+ */
+function guard<T extends unknown[]>(
+  report: () => ((message: string) => void) | undefined,
+  fn: (...args: T) => void,
+): (...args: T) => void {
+  return (...args: T) => {
+    try {
+      fn(...args);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      try {
+        report()?.(`map handler failed: ${message}`);
+      } catch {
+        // Reporting a failure must not itself become one.
+      }
+    }
+  };
+}
+
+/**
  * The chart display.
  *
  * MapLibre handles zoom, pan and the projection; this component owns only the
@@ -167,18 +205,24 @@ export function ChartView({
       pitch: 0,
     });
 
-    map.on('error', (e) => {
-      const err = e.error as (Error & { status?: number }) | undefined;
-      const source = (e as { sourceId?: string }).sourceId;
-      const status = err?.status ? ` (HTTP ${err.status})` : '';
-      const where = source ? `${source}: ` : '';
-      errorRef.current?.(`${where}${err?.message ?? 'unknown error'}${status}`);
-    });
+    const report = (): ((message: string) => void) | undefined => errorRef.current;
+    const safely = <T extends unknown[]>(fn: (...args: T) => void): ((...args: T) => void) =>
+      guard(report, fn);
+
+    map.on(
+      'error',
+      safely((e: { error?: unknown; sourceId?: string }) => {
+        const err = e.error as (Error & { status?: number }) | undefined;
+        const status = err?.status ? ` (HTTP ${err.status})` : '';
+        const where = e.sourceId ? `${e.sourceId}: ` : '';
+        errorRef.current?.(`${where}${err?.message ?? 'unknown error'}${status}`);
+      }),
+    );
 
     map.addControl(new maplibregl.NavigationControl({ showCompass: true }), 'top-right');
     map.addControl(new maplibregl.ScaleControl({ unit: 'nautical' }), 'bottom-left');
 
-    map.on('load', () => {
+    map.on('load', safely(() => {
       for (const id of SOURCES) {
         map.addSource(id, {
           type: 'geojson',
@@ -189,13 +233,16 @@ export function ChartView({
         map.addLayer(layer as maplibregl.LayerSpecification);
       }
       readyRef.current = true;
-    });
+    }));
 
-    map.on('click', (e) => {
-      clickRef.current?.({ lat: e.lngLat.lat, lon: e.lngLat.lng });
-    });
+    map.on(
+      'click',
+      safely((e: maplibregl.MapMouseEvent) => {
+        clickRef.current?.({ lat: e.lngLat.lat, lon: e.lngLat.lng });
+      }),
+    );
 
-    const reportView = (): void => {
+    const reportView = safely((): void => {
       const b = map.getBounds();
       viewRef.current?.({
         south: b.getSouth(),
@@ -203,7 +250,7 @@ export function ChartView({
         north: b.getNorth(),
         east: b.getEast(),
       });
-    };
+    });
 
     // moveend rather than move: the extent is only interesting once the
     // operator has stopped, and every consumer of it is expensive.

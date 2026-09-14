@@ -34,6 +34,16 @@ export interface GeoJsonFeatureCollection {
 
 const EARTH_METRES_PER_DEG_LAT = 111_320;
 
+/**
+ * Web Mercator is undefined at the poles, and a latitude of exactly +-90
+ * projects to an infinite y. Clamping short of it keeps every coordinate this
+ * module emits projectable, which matters because the heading line is sized in
+ * screen pixels: at low zoom `metresPerPixel * 30` is hundreds of kilometres,
+ * and a northbound vessel at high latitude would otherwise be given an
+ * endpoint past the pole.
+ */
+const MAX_LATITUDE = 89.9;
+
 function offset(
   lat: number,
   lon: number,
@@ -45,7 +55,11 @@ function offset(
   const dLat = dNorth / EARTH_METRES_PER_DEG_LAT;
   const dLon =
     dEast / (EARTH_METRES_PER_DEG_LAT * Math.max(0.01, Math.cos((lat * Math.PI) / 180)));
-  return [lon + dLon, lat + dLat];
+  return [lon + dLon, clamp(lat + dLat, -MAX_LATITUDE, MAX_LATITUDE)];
+}
+
+function clamp(value: number, low: number, high: number): number {
+  return Math.min(high, Math.max(low, value));
 }
 
 /** Hull outline: a ship-shaped polygon of the vessel's real dimensions. */

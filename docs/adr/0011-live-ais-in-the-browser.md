@@ -38,6 +38,15 @@ aisstream.io allows three concurrent connections per account and three per IP.
 Good: subscription follows the map view, so the feed carries the area being
 looked at rather than the world.
 
+`updateSubscription` must never throw, because of where it is called from: a
+map's `moveend` handler, which MapLibre runs inside its render task queue. An
+exception escaping that queue leaves it flagged as still running and the chart
+renders no further frame for the life of the page, in silence. A stale bounding
+box is a nuisance; a dead chart is the tool not working. So a subscription that
+cannot be sent is held rather than attempted — the socket is assigned while it
+is still `CONNECTING`, which is exactly when sending on it throws, and every
+reconnect passes through that window.
+
 The provider's limits are enforced in the adapter, not left to callers. It
 accepts at most one subscription per second, so `updateSubscription` holds an
 update inside that window and a newer one supersedes it — panning a map

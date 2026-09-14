@@ -374,6 +374,39 @@ every derived hull to be directionally stable. Large full-form tankers really
 removed one of the more instructive things an algorithm can be tested against.
 The correction is now opt-in.
 
+**One exception from a map listener kills the chart for the life of the page.**
+Reported as: with live AIS on, the chart worked for about a minute of panning
+and zooming and then stopped updating entirely, while every control on the page
+kept working. Two faults compounding.
+
+The trigger was in the AIS adapter. `updateSubscription` follows the operator's
+view, and it sent on the socket whenever one was assigned — but the socket is
+assigned the instant it is constructed, and a WebSocket that is still
+`CONNECTING` throws `InvalidStateError` when sent to. Every reconnect opens that
+window, and a reconnect is routine. Pan or zoom inside it and the send threw.
+
+The amplifier was in MapLibre. Camera callbacks — and with them `move`,
+`zoomend`, `moveend` — run inside its render task queue, which sets a
+`currentlyRunning` flag before iterating and clears it after, with no `finally`.
+A listener that throws leaves the flag set, so every subsequent frame throws
+`Attempting to run(), but is already running.` on the first line of `_render`,
+and that throw is swallowed by the frame promise's `catch`. The map renders no
+further frame, ever, with nothing in the console. The main thread is perfectly
+healthy, which is why the UI stayed responsive and why this reads as a tile or
+network problem when it is neither.
+
+Measured in Chromium against MapLibre 4.7.1: a single throwing `moveend`
+listener took the map from 10 renders to **0**, left the queue flagged as
+running, and left the camera stuck at the zoom it held — a following
+`easeTo` had no effect. Guarded, the same sequence rendered 41 frames and
+reached the commanded zoom.
+
+Both ends are fixed: the adapter holds a subscription until the socket can take
+it, and every map listener in `ChartView` is wrapped so that a bug becomes a
+message on screen rather than a silently dead chart. The second is the one that
+matters — the specific trigger was one of many possible, and without the wrapper
+the next one costs another round of this.
+
 ---
 
 ## 8. Open issues

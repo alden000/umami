@@ -74,6 +74,15 @@ export class AisStreamSource extends BaseAisSource {
   readonly kind = 'aisstream.io';
 
   private socket?: AisStreamSocket;
+  /**
+   * Whether the socket has opened and not yet closed.
+   *
+   * Tracked rather than read off the socket because `send` on a WebSocket that
+   * is still CONNECTING throws `InvalidStateError`, and the socket is assigned
+   * the moment it is constructed - so every reconnect leaves a window in which
+   * a caller following the map view would throw. See `sendSubscription`.
+   */
+  private socketOpen = false;
   private subscription?: AisSubscription;
   private readonly opts: AisStreamOptions;
   private readonly backoff: BackoffPolicy;
@@ -126,9 +135,31 @@ export class AisStreamSource extends BaseAisSource {
     }, SUBSCRIPTION_MIN_INTERVAL_MS - sinceLast);
   }
 
+  /**
+   * Send the current subscription, if there is anywhere to send it.
+   *
+   * This must never throw. `updateSubscription` is called from a map's
+   * `moveend` handler, which MapLibre runs inside its render task queue; an
+   * exception escaping from there leaves that queue flagged as still running
+   * and every subsequent frame fails on the check, so the chart freezes
+   * permanently while the rest of the page carries on. A rate-limited feed is
+   * a nuisance; a dead chart is the tool not working.
+   *
+   * Nothing is lost by not sending: the subscription is already stored, and
+   * `onopen` sends whatever is current the moment the socket is usable.
+   */
   private sendSubscription(): void {
-    if (!this.socket) return;
-    this.socket.send(JSON.stringify(this.buildSubscriptionMessage()));
+    if (!this.socket || !this.socketOpen) return;
+    try {
+      this.socket.send(JSON.stringify(this.buildSubscriptionMessage()));
+    } catch (err) {
+      // A socket that rejects a send is not a socket worth keeping.
+      this.socketOpen = false;
+      this.scheduleReconnect(
+        `subscription failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return;
+    }
     this.lastSubscriptionAt = this.now();
   }
 
@@ -139,6 +170,7 @@ export class AisStreamSource extends BaseAisSource {
     }
     this.reconnectHandle = undefined;
     this.pendingSubscriptionHandle = undefined;
+    this.socketOpen = false;
     this.socket?.close();
     this.socket = undefined;
     this.setState('stopped');
@@ -167,8 +199,12 @@ export class AisStreamSource extends BaseAisSource {
       return;
     }
     this.socket = socket;
+    // Not usable yet. The socket is CONNECTING until `onopen`, and sending on
+    // it before then throws.
+    this.socketOpen = false;
 
     socket.onopen = () => {
+      this.socketOpen = true;
       // Must arrive within 3 s or the server hangs up, so it is sent
       // immediately on open rather than after any other setup.
       this.sendSubscription();
@@ -185,6 +221,10 @@ export class AisStreamSource extends BaseAisSource {
     };
 
     socket.onclose = () => {
+      this.socketOpen = false;
+      // Drop the reference as well: a closed socket that is still held looks
+      // like a live one to anything that only checks for its presence.
+      if (this.socket === socket) this.socket = undefined;
       if (this.stopped) return;
       this.scheduleReconnect('connection closed');
     };

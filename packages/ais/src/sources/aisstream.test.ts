@@ -8,19 +8,28 @@ import type { AisMessage, AisPositionMessage, AisStaticMessage } from '../types.
 class FakeSocket implements AisStreamSocket {
   sent: string[] = [];
   closed = false;
+  /** Mirrors WebSocket.readyState: false until OPEN, and again once closed. */
+  opened = false;
   onopen: ((e: unknown) => void) | null = null;
   onmessage: ((e: { data: unknown }) => void) | null = null;
   onerror: ((e: unknown) => void) | null = null;
   onclose: ((e: unknown) => void) | null = null;
 
   send(data: string): void {
+    // A real WebSocket throws InvalidStateError when sent to while it is still
+    // CONNECTING. Modelling that is the whole point of this fake: the socket
+    // object exists from the moment it is constructed, so anything that checks
+    // only for its presence will try to send down a socket that cannot take it.
+    if (!this.opened) throw new Error('InvalidStateError: still CONNECTING');
     this.sent.push(data);
   }
   close(): void {
     this.closed = true;
+    this.opened = false;
   }
 
   open(): void {
+    this.opened = true;
     this.onopen?.({});
   }
   /** Deliver as a text frame. */
@@ -38,6 +47,7 @@ class FakeSocket implements AisStreamSocket {
     this.onmessage?.({ data: new Blob([JSON.stringify(frame)]) });
   }
   drop(): void {
+    this.opened = false;
     this.onclose?.({});
   }
   get subscription(): Record<string, unknown> {
@@ -111,6 +121,9 @@ const POSITION_FRAME = {
     },
   },
 };
+
+/** Singapore Strait, the area the web client opens on. */
+const BOX = { south: 1.1, west: 103.5, north: 1.4, east: 104.1 };
 
 describe('subscription', () => {
   it('sends a complete subscription immediately on open', async () => {
@@ -480,6 +493,73 @@ describe('reconnection', () => {
 
     expect(h.sockets).toHaveLength(1);
     expect(h.source.status.state).toBe('stopped');
+  });
+
+  // These cover the cause of a chart that froze after a minute of panning and
+  // zooming with live AIS on. `updateSubscription` is called from the map's
+  // `moveend` handler, which MapLibre runs inside its render task queue; that
+  // queue marks itself as running and clears the flag only after the loop, so
+  // an exception escaping a listener leaves it permanently flagged and every
+  // later frame fails immediately. The chart stops rendering for good, in
+  // silence, while the rest of the page is fine. Nothing here may throw.
+  describe('never throws at the caller', () => {
+    it('holds a subscription sent while the socket is still connecting', async () => {
+      const h = harness();
+      await h.source.start();
+
+      // The socket exists but has not opened. This is the window every
+      // reconnect passes through.
+      expect(() => h.source.updateSubscription({ boundingBoxes: [BOX] })).not.toThrow();
+      expect(h.sockets[0]!.sent).toHaveLength(0);
+
+      // And it goes out, current, as soon as the socket can take it.
+      h.sockets[0]!.open();
+      expect(h.sockets[0]!.sent).toHaveLength(1);
+      expect(h.sockets[0]!.subscription.BoundingBoxes).toEqual([
+        [
+          [BOX.south, BOX.west],
+          [BOX.north, BOX.east],
+        ],
+      ]);
+    });
+
+    it('survives a view change during the gap between connections', async () => {
+      const h = harness();
+      await h.source.start();
+      h.sockets[0]!.open();
+      h.sockets[0]!.drop();
+
+      // Reconnect is scheduled but has not fired: there is no socket at all.
+      expect(() => h.source.updateSubscription({ boundingBoxes: [BOX] })).not.toThrow();
+
+      h.runTimers();
+      h.sockets[1]!.open();
+      expect(h.sockets[1]!.subscription.BoundingBoxes).toEqual([
+        [
+          [BOX.south, BOX.west],
+          [BOX.north, BOX.east],
+        ],
+      ]);
+    });
+
+    it('reconnects rather than throwing when a send is rejected', async () => {
+      const h = harness();
+      await h.source.start();
+      const socket = h.sockets[0]!;
+      socket.open();
+      // Open as far as this adapter knows, but the underlying socket refuses -
+      // a connection torn down without an onclose, which does happen.
+      socket.opened = false;
+
+      h.source.updateSubscription({ boundingBoxes: [BOX] });
+      // Held behind the provider's one-per-second limit, so the send happens
+      // when that timer fires - which must not throw out of the timer either.
+      expect(() => h.runTimers()).not.toThrow();
+      expect(h.source.status.state).toBe('reconnecting');
+
+      h.runTimers();
+      expect(h.sockets).toHaveLength(2);
+    });
   });
 
   it('backs off further on each successive failure', async () => {
