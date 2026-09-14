@@ -35,8 +35,18 @@ same pattern as charts opened from local disk — public app, private inputs.
 Good: each operator uses their own account, so nobody shares a rate limit.
 aisstream.io allows three concurrent connections per account and three per IP.
 
-Good: subscription follows the map view, so the feed carries the area being
-looked at rather than the world.
+The subscribed area is a **fixed window**, not the map view. Following the view
+was the original arrangement and was worse in both directions: zooming in on one
+vessel silently unsubscribed from the traffic around it, and zooming out asked
+the provider for a region nobody was watching. Either way the picture changed
+because of where the operator happened to be looking, which is the opposite of
+what a traffic picture is for. It also generated subscription updates far faster
+than the one per second the provider accepts, for no gain.
+
+The window is a constant in the web client (`AIS_WINDOW`), currently the
+Singapore Strait and its approaches. `updateSubscription` remains on the source
+for callers that do want to follow something - the headless runner following own
+ship, for instance - and still enforces the rate limit.
 
 `updateSubscription` must never throw, because of where it is called from: a
 map's `moveend` handler, which MapLibre runs inside its render task queue. An

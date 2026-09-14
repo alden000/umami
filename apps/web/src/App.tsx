@@ -38,6 +38,31 @@ const SCENARIO: ScenarioDefinition = {
   ],
 };
 
+/**
+ * The area live AIS is subscribed to.
+ *
+ * Fixed rather than following the map view. Two reasons it is better fixed.
+ * The picture stays the same whatever the operator is looking at, so zooming in
+ * on one vessel does not quietly discard the traffic around it and zooming out
+ * does not flood the feed with a region nobody is watching. And the provider
+ * caps subscription updates at one per second, so a bounding box driven by pan
+ * and zoom is a stream of updates against a rate limit for no gain.
+ *
+ * Corners are the Singapore Strait and its approaches: north-west 1.5824335 N
+ * 103.2699253 E, south-east 1.0733847 N 104.8299920 E - about 93 nm east-west
+ * by 31 nm north-south, covering the westbound and eastbound lanes, the Johor
+ * Strait and the eastern anchorages.
+ *
+ * The adapter applies this box locally as well as sending it, so a contact
+ * outside it is dropped either way.
+ */
+const AIS_WINDOW: AisBoundingBox = {
+  north: 1.5824335,
+  west: 103.2699253,
+  south: 1.0733847,
+  east: 104.8299920,
+};
+
 const GHOST_CLASSES: VesselClassId[] = [
   'container-large',
   'container-feeder',
@@ -73,7 +98,6 @@ export function App(): JSX.Element {
   const sim = useSimulation(SCENARIO);
   const ais = useAisStream(sim.world);
   const [showAisPanel, setShowAisPanel] = useState(false);
-  const viewBoundsRef = useRef<AisBoundingBox | undefined>(undefined);
   const [mapError, setMapError] = useState<{ message: string; count: number } | undefined>();
   const colours = BUNDLED_COLOUR_TABLES[scheme];
 
@@ -129,12 +153,6 @@ export function App(): JSX.Element {
               : { message, count: 1 },
           )
         }
-        onViewChange={(b) => {
-          viewBoundsRef.current = b;
-          // Follow the view only while connected. The source throttles to the
-          // provider's one-subscription-per-second limit.
-          if (ais.connected) ais.setBounds(b);
-        }}
         onMapClick={(position) => {
           if (!dropMode) return;
           sim.spawnGhost(position, ghostClass);
@@ -220,17 +238,7 @@ export function App(): JSX.Element {
               <button onClick={ais.disconnect}>Disconnect</button>
             ) : (
               <button
-                onClick={() => {
-                  // Fall back to the scenario area if the map has not reported
-                  // an extent yet, so the button always does something.
-                  const bounds = viewBoundsRef.current ?? {
-                    south: SCENARIO.origin.lat - 0.5,
-                    west: SCENARIO.origin.lon - 0.5,
-                    north: SCENARIO.origin.lat + 0.5,
-                    east: SCENARIO.origin.lon + 0.5,
-                  };
-                  ais.connect(bounds);
-                }}
+                onClick={() => ais.connect(AIS_WINDOW)}
                 disabled={!ais.apiKey}
                 data-testid="ais-connect"
               >
@@ -242,9 +250,11 @@ export function App(): JSX.Element {
             </button>
           </div>
           <p className="ais-note">
-            Subscribes to the area you are looking at and follows it as you pan.
-            Contacts are observations &mdash; dead-reckoned between reports, and
-            dropped when they go quiet, never extrapolated indefinitely.
+            Fixed window &mdash; {formatCorner(AIS_WINDOW.north, AIS_WINDOW.west)} to{' '}
+            {formatCorner(AIS_WINDOW.south, AIS_WINDOW.east)}. The picture does
+            not change as you pan or zoom. Contacts are observations &mdash;
+            dead-reckoned between reports, and dropped when they go quiet, never
+            extrapolated indefinitely.
           </p>
         </div>
       )}
@@ -361,6 +371,13 @@ export function App(): JSX.Element {
       </div>
     </div>
   );
+}
+
+/** One corner of a bounding box, as a mariner would write it. */
+function formatCorner(lat: number, lon: number): string {
+  const ns = lat >= 0 ? 'N' : 'S';
+  const ew = lon >= 0 ? 'E' : 'W';
+  return `${Math.abs(lat).toFixed(4)}\u00b0${ns} ${Math.abs(lon).toFixed(4)}\u00b0${ew}`;
 }
 
 function pad3(deg: number): string {
